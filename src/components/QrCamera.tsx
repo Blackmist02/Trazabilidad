@@ -1,7 +1,9 @@
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
+import type { Result } from '@zxing/library';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkCameraSupport, mapCameraError, type CameraError } from '../lib/camera';
-import { captureVideoFrame } from '../lib/ocr';
+import { captureVideoFrame, type CapturedFrame } from '../lib/ocr';
+import type { Point, QrLocation } from '../lib/ocrName';
 
 export type CameraState = 'idle' | 'starting' | 'scanning' | 'paused' | 'error';
 
@@ -12,18 +14,29 @@ interface Props {
   /** Se incrementa cuando hay una lectura aceptada, para el destello visual. */
   flashKey: number;
   /** Recibe una función que copia el fotograma actual (null si la cámara no está activa). */
-  frameRef?: { current: (() => HTMLCanvasElement | null) | null };
+  frameRef?: { current: (() => CapturedFrame | null) | null };
   /** Se invoca cuando la cámara empieza a mostrar imagen. */
   onStarted?: () => void;
 }
 
 const DEVICE_KEY = 'trazabilidad.cameraDevice';
+/** La posición del QR se usa solo si es reciente: la credencial puede haberse movido. */
+const QR_POSITION_MAX_AGE_MS = 1500;
+
+/** Posición del QR en píxeles del vídeo (zxing: inferior izquierdo, superior izquierdo, superior derecho). */
+function qrLocation(result: Result): QrLocation | null {
+  const p = result.getResultPoints();
+  if (!p || p.length < 3) return null;
+  const pt = (i: number): Point => [p[i].getX(), p[i].getY()];
+  return { bottomLeft: pt(0), topLeft: pt(1), topRight: pt(2) };
+}
 
 export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const onDecodeRef = useRef(onDecode);
   const pausedRef = useRef(paused);
+  const lastQrRef = useRef<{ at: number; location: QrLocation } | null>(null);
   const [state, setState] = useState<CameraState>('idle');
   const [error, setError] = useState<CameraError | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -43,7 +56,17 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
     // Se comprueba el vídeo y no los controles: la primera lectura puede llegar antes de que zxing los devuelva.
     frameRef.current = () => {
       const video = videoRef.current;
-      return video && video.srcObject && video.readyState >= 2 ? captureVideoFrame(video) : null;
+      if (!video || !video.srcObject || video.readyState < 2) return null;
+      const canvas = captureVideoFrame(video);
+      if (!canvas) return null;
+      const last = lastQrRef.current;
+      const k = canvas.width / video.videoWidth;
+      const scale = ([x, y]: Point): Point => [x * k, y * k];
+      const qr =
+        last && Date.now() - last.at < QR_POSITION_MAX_AGE_MS
+          ? { bottomLeft: scale(last.location.bottomLeft), topLeft: scale(last.location.topLeft), topRight: scale(last.location.topRight) }
+          : null;
+      return { canvas, qr };
     };
     return () => {
       frameRef.current = null;
@@ -81,7 +104,11 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
       };
       try {
         const controls = await reader.decodeFromConstraints(constraints, video, (result) => {
-          if (result && !pausedRef.current) onDecodeRef.current(result.getText());
+          if (!result) return;
+          // Se sigue anotando la posición con la confirmación abierta, para «Volver a leer».
+          const location = qrLocation(result);
+          lastQrRef.current = location ? { at: Date.now(), location } : null;
+          if (!pausedRef.current) onDecodeRef.current(result.getText());
         });
         controlsRef.current = controls;
         setState('scanning');

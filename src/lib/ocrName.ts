@@ -5,7 +5,8 @@
  *   1.ª línea: nombre y apellido
  *   2.ª línea: institución de procedencia
  *   3.ª línea: cargo o rol en la institución
- * Encima puede haber una cabecera (nombre del evento) y debajo el QR.
+ * Encima puede haber una cabecera (nombre del evento). El QR suele ir justo encima del bloque
+ * (p. ej. Edifica 2026), así que primero se lee la franja bajo el QR; si no, se busca en toda la imagen.
  *
  * Todo lo que se obtiene es una sugerencia: el operador siempre la confirma.
  */
@@ -59,7 +60,7 @@ const NON_NAME_WORDS = [
   'dia', 'dias', 'octubre', 'noviembre', 'diciembre', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
   'agosto', 'septiembre', 'media', 'partner', 'sponsor', 'auspiciador', 'tecnologia', 'innovacion', 'internacional',
   'nacional', 'conferencia', 'seminario', 'workshop', 'premium', 'pass', 'all', 'access', 'full', 'badge', 'attendee',
-  'visitor', 'exhibitor', 'press', 'clinica', 'hospital', 'fundacion', 'corporacion', 'servicio', 'subsecretaria',
+  'visitor', 'exhibitor', 'press', 'presenta', 'auspicia', 'patrocina', 'organiza', 'coorganiza', 'socio', 'estrategico', 'clinica', 'hospital', 'fundacion', 'corporacion', 'servicio', 'subsecretaria',
   'facultad', 'departamento', 'escuela', 'centro', 'banco', 'consultora', 'constructora', 'minera', 'compania',
 ];
 
@@ -228,6 +229,18 @@ export function groupRows(lines: OcrLine[], minConfidence = MIN_CONFIDENCE): Row
     .sort((a, b) => a.top - b.top);
 }
 
+/**
+ * Filas de un recorte leído línea a línea (PSM 6): tesseract ya entrega cada línea completa,
+ * así que no se unen. Unirlas por solapamiento vertical mezclaría el nombre con la institución
+ * cuando las letras del nombre (g, j, p…) bajan hasta la línea siguiente.
+ */
+export function lineRows(lines: OcrLine[], minConfidence = MIN_CONFIDENCE): Row[] {
+  return lines
+    .filter((l) => l.confidence >= minConfidence && countLetters(l.text) >= 2)
+    .sort((a, b) => a.top - b.top)
+    .map((l) => ({ ...l, text: l.text.trim(), height: Math.max(1, l.bottom - l.top) }));
+}
+
 /** ¿La fila `b` sigue a la fila `a` como parte del mismo bloque de texto? */
 function follows(a: Row, b: Row): boolean {
   const gap = b.top - a.bottom;
@@ -305,7 +318,7 @@ export function analyzeBadge(lines: OcrLine[], extraStopwords: string[] = []): B
  */
 export function mergeBlockReading(first: BadgeReading, blockLines: OcrLine[], extraStopwords: string[] = []): BadgeReading {
   // Filas legibles del recorte, en orden: nombre, institución, cargo.
-  const rows = groupRows(blockLines).filter((r) => cleanAffiliation(r.text));
+  const rows = lineRows(blockLines).filter((r) => cleanAffiliation(r.text));
   if (!rows.length) return first;
   const words = nameWords(rows[0].text, buildStopwords(extraStopwords));
   if (!words) return first; // la primera línea no parece un nombre: se mantiene la primera lectura
@@ -330,4 +343,80 @@ export function mergeBlockReading(first: BadgeReading, blockLines: OcrLine[], ex
 /** Compatibilidad: solo los candidatos a nombre. */
 export function extractNameCandidates(lines: OcrLine[], extraStopwords: string[] = []): NameCandidate[] {
   return analyzeBadge(lines, extraStopwords).names;
+}
+
+export type Point = [number, number];
+
+/** Centros de los patrones de ubicación del QR, en píxeles del fotograma (los entrega zxing). */
+export interface QrLocation {
+  bottomLeft: Point;
+  topLeft: Point;
+  topRight: Point;
+}
+
+export interface QrCrop {
+  width: number;
+  height: number;
+  /** Matriz para `ctx.setTransform(a, b, c, d, e, f)`: lleva el fotograma al recorte. */
+  matrix: [number, number, number, number, number, number];
+}
+
+/**
+ * Franja bajo el QR, alineada con sus ejes (corrige giro e inclinación de la credencial).
+ * Unidades: lado del QR, desde su centro. Escala: el lado del QR mide `qrPixels` en el recorte,
+ * con lo que el nombre queda con un alto legible para el OCR.
+ */
+export const QR_CROP_PIXELS = 150;
+
+export function belowQrCrop(qr: QrLocation, { left = -3, right = 3, top = 0.45, bottom = 2.5, qrPixels = QR_CROP_PIXELS } = {}): QrCrop | null {
+  const { bottomLeft: bl, topLeft: tl, topRight: tr } = qr;
+  const ux = tr[0] - tl[0], uy = tr[1] - tl[1];
+  const vx = bl[0] - tl[0], vy = bl[1] - tl[1];
+  const du = Math.hypot(ux, uy), dv = Math.hypot(vx, vy);
+  if (du < 8 || dv < 8 || Math.max(du, dv) > 2 * Math.min(du, dv)) return null;
+  // Entre centros de los patrones hay N − 7 módulos de N: el lado completo es ~1,4 veces esa distancia.
+  const side = ((du + dv) / 2) * 1.4;
+  const s = qrPixels / side; // píxeles del recorte por píxel del fotograma
+  const cx = (tr[0] + bl[0]) / 2, cy = (tr[1] + bl[1]) / 2;
+  // Recorte → fotograma: src = t + A·dst, con A = [u/(|u|·s), v/(|v|·s)].
+  const a = ux / du / s, c = uy / du / s, b = vx / dv / s, d = vy / dv / s;
+  const tx = cx + (ux / du) * left * side + (vx / dv) * top * side;
+  const ty = cy + (uy / du) * left * side + (vy / dv) * top * side;
+  const det = a * d - b * c;
+  if (Math.abs(det) < 1e-9) return null;
+  // Inversa (fotograma → recorte) en el orden de setTransform: x' = m0·x + m2·y + m4, y' = m1·x + m3·y + m5.
+  const m0 = d / det, m2 = -b / det, m1 = -c / det, m3 = a / det;
+  return {
+    width: Math.round((right - left) * qrPixels),
+    height: Math.round((bottom - top) * qrPixels),
+    matrix: [m0, m1, m2, m3, -(m0 * tx + m2 * ty), -(m1 * tx + m3 * ty)],
+  };
+}
+
+/**
+ * Lectura de la franja bajo el QR: la primera fila con forma de nombre (se tolera una fila de ruido
+ * antes, p. ej. el borde del QR) y las dos siguientes como institución y cargo.
+ * El nombre debe empezar antes de `maxNameTop` (justo bajo el QR): así una fila de auspiciadores
+ * más abajo no se toma por un nombre en credenciales con otro formato.
+ */
+export function readBelowQr(lines: OcrLine[], extraStopwords: string[] = [], maxNameTop = Infinity): BadgeReading {
+  const empty: BadgeReading = { names: [], institution: null, role: null, block: null, nameHeight: 0 };
+  const rows = lineRows(lines).filter((r) => cleanAffiliation(r.text));
+  const stop = buildStopwords(extraStopwords);
+  for (let i = 0; i < Math.min(2, rows.length); i++) {
+    if (rows[i].top > maxNameTop) break;
+    const words = nameWords(rows[i].text, stop);
+    if (!words) continue;
+    // Una fila baja seguida de otra mucho más alta con forma de nombre es ruido (borde del QR).
+    const next = rows[i + 1];
+    if (i === 0 && next && next.height > 1.5 * rows[i].height && next.top <= maxNameTop && nameWords(next.text, stop)) continue;
+    return {
+      names: [{ name: formatName(words), score: Infinity }],
+      institution: cleanAffiliation(rows[i + 1]?.text),
+      role: cleanAffiliation(rows[i + 2]?.text),
+      block: null,
+      nameHeight: rows[i].height,
+    };
+  }
+  return empty;
 }

@@ -61,22 +61,23 @@ El QR de la credencial solo contiene un identificador, pero el nombre, la instit
 ```
 ┌──────────────────────────────┐
 │  (cabecera del evento)       │
+│            [QR]              │  ← en Edifica 2026 el QR va encima del bloque
 │  Nombre y apellido           │  ← 1.ª línea  → attendee_name
 │  Institución                 │  ← 2.ª línea  → attendee_institution
 │  Cargo en la institución     │  ← 3.ª línea  → attendee_role
-│            [QR]              │
 └──────────────────────────────┘
 ```
 
-Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo lee con OCR ([tesseract.js](https://github.com/naptha/tesseract.js), modelo en español) **dentro del teléfono**, en dos pasadas (`src/lib/ocr.ts`, `src/lib/ocrName.ts`):
+Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo lee con OCR ([tesseract.js](https://github.com/naptha/tesseract.js), modelo en español) **dentro del teléfono** (`src/lib/ocr.ts`, `src/lib/ocrName.ts`):
 
+0. **Bajo el QR** (lo primero): zxing indica dónde está el QR. Se recorta la franja justo debajo, enderezada según los ejes del código (corrige giros e inclinación) y ampliada, y se lee línea a línea: nombre, institución y cargo. Las líneas no se unen aunque se toquen (en la credencial real la «g» del nombre baja hasta la institución). Si ahí no hay un nombre, se sigue con los pasos 1 y 2.
 1. **Ubicar el bloque**: lectura de texto disperso en toda la imagen. Se busca la línea que parece un nombre de persona y que tiene **dos líneas debajo** (institución y cargo). Esa estructura evita confundir la cabecera del evento con el nombre, o tomar la institución como apellido cuando las tres líneas tienen el mismo tamaño.
 2. **Releer ampliado**: se recorta solo ese bloque, se amplía y se lee línea a línea. Así se recuperan palabras cortadas o letras pequeñas o en cursiva. En orden: nombre, institución y cargo.
 3. «MARÍA JOSÉ» se escribe como «María José» y se corrigen minúsculas sueltas del OCR («PÉREZ soTO»). La institución y el cargo se guardan tal como están impresos.
 4. Los tres campos aparecen rellenados en el formulario. El operador los verifica y pulsa «Registrar visita». «Volver a leer» captura otro fotograma.
 5. Se guarda con `name_source = 'ocr'`. La próxima vez que se escanee ese mismo código se proponen el nombre, la institución y el cargo ya confirmados, sin volver a hacer OCR.
 
-En credenciales de prueba con este formato, de distintos tamaños, tipografías e inclinaciones, se obtuvieron correctamente los tres campos en todas, en ~0,5 s en un computador. En un teléfono tarda más, y con luz o enfoque deficientes la lectura puede fallar: el operador siempre puede corregir.
+Con la foto de una credencial real de Edifica 2026 (tomada con la app en un iPhone) se obtienen los tres campos, también con la credencial girada ±12° o al revés; antes de este paso la app leía «Ela». En credenciales de prueba con el QR debajo, de distintos tamaños, tipografías e inclinaciones, también se obtienen los tres campos. Tarda ~0,2–0,5 s en un computador. En un teléfono tarda más, y con luz o enfoque deficientes la lectura puede fallar: el operador siempre puede corregir.
 
 Privacidad: la imagen no se guarda ni se envía a ningún servicio. Los archivos del OCR (~6 MB) se sirven desde la propia app (`public/ocr`, copiados en `npm run build`), se descargan al iniciar la cámara por primera vez y quedan en caché para funcionar sin conexión. Se puede desactivar en *Ajustes → Leer la credencial con la cámara*, y la institución y el cargo en *Ajustes → Registrar institución y cargo*.
 
@@ -96,7 +97,7 @@ El ejemplo real `BDFFE48F81E448617430250Enp` es un **identificador opaco**. No h
 ```bash
 npm ci
 npm run dev        # http://localhost:5173/Trazabilidad/ (localhost permite la cámara)
-npm test           # 79 pruebas (Vitest + Testing Library + fake-indexeddb)
+npm test           # 88 pruebas (Vitest + Testing Library + fake-indexeddb)
 npm run build      # tsc + vite build → dist/
 ```
 
@@ -113,7 +114,7 @@ El workflow `.github/workflows/deploy.yml` ejecuta pruebas y build en cada push 
 
 ## Supabase (opcional)
 
-Consulta [`docs/SUPABASE.md`](docs/SUPABASE.md). Resumen: ejecutar `supabase/schema.sql`, crear usuarios operadores, registrarlos en `operators`, desactivar el registro público y poner la URL y la *publishable key* en Ajustes (o como variables del repositorio).
+Proyecto enlazado por defecto: `https://txkyhzlqzordftthjfxb.supabase.co` (URL y *publishable key* en `.github/workflows/deploy.yml`; son públicas por diseño). Consulta [`docs/SUPABASE.md`](docs/SUPABASE.md). Resumen: ejecutar `supabase/schema.sql`, crear usuarios operadores, registrarlos en `operators`, desactivar el registro público y poner la URL y la *publishable key* en Ajustes (o como variables del repositorio).
 
 ## Privacidad
 

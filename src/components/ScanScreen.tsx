@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { beep, vibrate } from '../lib/feedback';
-import { ocrSupported, prewarmOcr, readBadge } from '../lib/ocr';
+import { ocrSupported, prewarmOcr, readBadge, type CapturedFrame } from '../lib/ocr';
 import { parseQr } from '../lib/qr';
 import { ScanGate } from '../lib/scanGate';
 import { formatLocalTime, localDateKey } from '../lib/time';
@@ -25,7 +25,7 @@ export function ScanScreen() {
   const [toast, setToast] = useState<Toast | null>(null);
   const visitsRef = useRef(visits);
   visitsRef.current = visits;
-  const frameRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
+  const frameRef = useRef<(() => CapturedFrame | null) | null>(null);
   const ocrRunRef = useRef(0);
   const [ocr, setOcr] = useState<OcrState>(OCR_IDLE);
   const ocrEnabled = settings.ocrEnabled && ocrSupported();
@@ -33,7 +33,7 @@ export function ScanScreen() {
   eventNameRef.current = settings.eventName;
 
   /** OCR del fotograma en segundo plano; descarta resultados de lecturas anteriores. */
-  const runOcr = useCallback((frame: HTMLCanvasElement | null) => {
+  const runOcr = useCallback((frame: CapturedFrame | null) => {
     const run = ++ocrRunRef.current;
     if (!frame) {
       setOcr({ ...OCR_IDLE, status: 'no-camera' });
@@ -64,7 +64,7 @@ export function ScanScreen() {
   }, [toast]);
 
   const openCandidate = useCallback(
-    (text: string | null, source: Candidate['source'], frame: HTMLCanvasElement | null = null) => {
+    (text: string | null, source: Candidate['source'], frame: CapturedFrame | null = null) => {
       const scannedAt = new Date();
       const parsed = text ? parseQr(text) : null;
       const eventDate = localDateKey(scannedAt, settings.timeZone);

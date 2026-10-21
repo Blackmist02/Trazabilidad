@@ -1,5 +1,11 @@
 import type { Worker } from 'tesseract.js';
-import { analyzeBadge, mergeBlockReading, type BadgeReading, type Box, type OcrLine } from './ocrName';
+import { analyzeBadge, belowQrCrop, mergeBlockReading, QR_CROP_PIXELS, readBelowQr, type BadgeReading, type Box, type OcrLine, type QrLocation } from './ocrName';
+
+/** Fotograma copiado de la cámara y, si se conoce, la posición del QR en él. */
+export interface CapturedFrame {
+  canvas: HTMLCanvasElement;
+  qr: QrLocation | null;
+}
 
 /**
  * OCR en el propio dispositivo con tesseract.js (WebAssembly).
@@ -76,14 +82,38 @@ function cropBlock(frame: HTMLCanvasElement, block: Box, nameHeight: number): HT
   return canvas;
 }
 
+/** Franja bajo el QR, enderezada y ampliada. */
+function cropBelowQr(frame: HTMLCanvasElement, qr: QrLocation): HTMLCanvasElement | null {
+  const crop = belowQrCrop(qr);
+  if (!crop) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = crop.width;
+  canvas.height = crop.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.setTransform(...crop.matrix);
+  ctx.drawImage(frame, 0, 0);
+  return canvas;
+}
+
 /**
- * Lee la credencial en dos pasadas:
- * 1. Texto disperso en todo el fotograma para ubicar el bloque nombre / institución / cargo.
+ * Lee la credencial:
+ * 0. Si se sabe dónde está el QR, la franja justo debajo (formato con el QR sobre el nombre).
+ * 1. Si no, texto disperso en todo el fotograma para ubicar el bloque nombre / institución / cargo.
  * 2. Relectura del bloque recortado y ampliado, línea a línea, para mayor precisión.
  */
-export function readBadge(frame: HTMLCanvasElement, extraStopwords: string[]): Promise<BadgeReading> {
+export function readBadge({ canvas: frame, qr }: CapturedFrame, extraStopwords: string[]): Promise<BadgeReading> {
   const job = queue.then(async () => {
     const worker = await prewarmOcr();
+    const below = qr ? cropBelowQr(frame, qr) : null;
+    if (below) {
+      // El nombre debe empezar a menos de un lado de QR del borde superior de la franja.
+      const reading = readBelowQr(await recognize(worker, below, '6'), extraStopwords, QR_CROP_PIXELS);
+      if (reading.names.length) return reading;
+    }
     const first = analyzeBadge(await recognize(worker, frame, '11'), extraStopwords);
     if (!first.block) return first;
     const crop = cropBlock(frame, first.block, first.nameHeight);

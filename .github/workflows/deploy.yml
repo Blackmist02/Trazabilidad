@@ -27,10 +27,12 @@ jobs:
       - run: npm test
       - run: npm run build
         env:
-          # Opcionales: valores públicos por defecto para el modo sincronizado
-          # (Settings → Secrets and variables → Actions → Variables).
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Proyecto de Supabase por defecto para el modo sincronizado. Son valores públicos por diseño
+          # (la seguridad la dan RLS y el inicio de sesión). Se pueden sustituir con variables del
+          # repositorio (Settings → Secrets and variables → Actions → Variables).
+          # Nunca poner aquí una clave sb_secret_… ni service_role.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || 'https://txkyhzlqzordftthjfxb.supabase.co' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_5XMtxXPOBnS5hVLNymrVrQ_aXHGnEhc' }}
       - name: Página 404 de respaldo
         run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3

@@ -53,7 +53,13 @@ export function loadSettings(storage: Storage | undefined = safeStorage()): Sett
   try {
     const raw = storage?.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    return normalizeSettings({ ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) });
+    const saved = JSON.parse(raw) as Partial<Settings>;
+    // Una conexión vacía guardada antes de que hubiera un proyecto por defecto no lo oculta.
+    if (!saved.supabaseUrl?.trim()) {
+      delete saved.supabaseUrl;
+      delete saved.supabaseKey;
+    }
+    return normalizeSettings({ ...DEFAULT_SETTINGS, ...saved });
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

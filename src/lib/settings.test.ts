@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, normalizeSettings, validateSupabaseKey, validateSupabaseUrl } from './settings';
+import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, validateSupabaseKey, validateSupabaseUrl } from './settings';
 
 function jwt(payload: object): string {
   const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -32,5 +32,25 @@ describe('normalizeSettings', () => {
     expect(s.timeZone).toBe('America/Santiago');
     expect(s.cooldownSeconds).toBe(60);
     expect(s.standId).toBe('stand-1');
+  });
+});
+
+describe('loadSettings', () => {
+  function memoryStorage(value: object): Storage {
+    const data = new Map([['trazabilidad.settings.v1', JSON.stringify(value)]]);
+    return { getItem: (k: string) => data.get(k) ?? null } as Storage;
+  }
+
+  it('una conexión vacía guardada no oculta el proyecto por defecto', () => {
+    const s = loadSettings(memoryStorage({ supabaseUrl: '', supabaseKey: '', standId: 'stand-9' }));
+    expect(s.supabaseUrl).toBe(DEFAULT_SETTINGS.supabaseUrl);
+    expect(s.supabaseKey).toBe(DEFAULT_SETTINGS.supabaseKey);
+    expect(s.standId).toBe('stand-9');
+  });
+
+  it('respeta una conexión propia guardada en el dispositivo', () => {
+    const s = loadSettings(memoryStorage({ supabaseUrl: 'https://otro.supabase.co', supabaseKey: 'sb_publishable_x' }));
+    expect(s.supabaseUrl).toBe('https://otro.supabase.co');
+    expect(s.supabaseKey).toBe('sb_publishable_x');
   });
 });

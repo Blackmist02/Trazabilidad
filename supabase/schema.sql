@@ -5,7 +5,7 @@
 -- Modelo de acceso:
 --   * Solo usuarios autenticados que figuren en public.operators pueden leer, crear o corregir visitas.
 --   * Nadie puede borrar visitas desde el cliente (no hay política DELETE).
---   * Cada corrección de nombre/observaciones queda registrada en public.visit_audit mediante trigger.
+--   * Cada corrección de nombre, institución, cargo u observaciones queda registrada en public.visit_audit mediante trigger.
 --   * La fecha/hora de la visita, el código y el stand no se pueden modificar después de creados.
 
 -- ── Operadores autorizados ──────────────────────────────────────────────
@@ -21,6 +21,10 @@ drop policy if exists "operators_read_self" on public.operators;
 create policy "operators_read_self" on public.operators
   for select to authenticated
   using (user_id = (select auth.uid()));
+-- Los operadores solo se dan de alta desde el SQL Editor (ver el final del archivo).
+revoke all on public.operators from anon;
+revoke insert, update, delete on public.operators from authenticated;
+grant select on public.operators to authenticated;
 
 -- ¿El usuario actual es operador del stand indicado?
 create or replace function public.is_operator(p_stand_id text)
@@ -138,7 +142,7 @@ begin
      or new.qr_kind <> old.qr_kind
      or new.created_at <> old.created_at
      or new.created_by <> old.created_by then
-    raise exception 'Solo se pueden corregir el nombre y las observaciones' using errcode = '22023';
+    raise exception 'Solo se pueden corregir el nombre, la institución, el cargo y las observaciones' using errcode = '22023';
   end if;
 
   if new.attendee_name is distinct from old.attendee_name then
