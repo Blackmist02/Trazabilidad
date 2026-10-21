@@ -105,20 +105,35 @@ function cropBelowQr(frame: HTMLCanvasElement, qr: QrLocation): HTMLCanvasElemen
  * 1. Si no, texto disperso en todo el fotograma para ubicar el bloque nombre / institución / cargo.
  * 2. Relectura del bloque recortado y ampliado, línea a línea, para mayor precisión.
  */
-export function readBadge({ canvas: frame, qr }: CapturedFrame, extraStopwords: string[]): Promise<BadgeReading> {
-  const job = queue.then(async () => {
+export interface BadgeResult extends BadgeReading {
+  /**
+   * Miniatura de la zona leída, para que el operador vea qué leyó el OCR.
+   * Solo se muestra en la confirmación: no se guarda ni se envía.
+   */
+  preview: string | null;
+}
+
+function preview(canvas: HTMLCanvasElement): string | null {
+  try {
+    return canvas.toDataURL('image/jpeg', 0.7);
+  } catch {
+    return null;
+  }
+}
+
+export function readBadge({ canvas: frame, qr }: CapturedFrame, extraStopwords: string[]): Promise<BadgeResult> {
+  const job = queue.then(async (): Promise<BadgeResult> => {
     const worker = await prewarmOcr();
     const below = qr ? cropBelowQr(frame, qr) : null;
     if (below) {
       // El nombre debe empezar a menos de un lado de QR del borde superior de la franja.
       const reading = readBelowQr(await recognize(worker, below, '6'), extraStopwords, QR_CROP_PIXELS);
-      if (reading.names.length) return reading;
+      if (reading.names.length) return { ...reading, preview: preview(below) };
     }
     const first = analyzeBadge(await recognize(worker, frame, '11'), extraStopwords);
-    if (!first.block) return first;
-    const crop = cropBlock(frame, first.block, first.nameHeight);
-    if (!crop) return first;
-    return mergeBlockReading(first, await recognize(worker, crop, '6'), extraStopwords);
+    const crop = first.block ? cropBlock(frame, first.block, first.nameHeight) : null;
+    if (!crop) return { ...first, preview: preview(below ?? frame) };
+    return { ...mergeBlockReading(first, await recognize(worker, crop, '6'), extraStopwords), preview: preview(crop) };
   });
   queue = job.catch(() => undefined);
   return job;

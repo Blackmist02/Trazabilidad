@@ -31,6 +31,18 @@ export class ScanGate {
     return true;
   }
 
+  /**
+   * El código está a la vista pero aún no se procesa (p. ej. credencial sin alinear).
+   * Devuelve true si estaría bloqueado; si es el último procesado, renueva su enfriamiento.
+   */
+  seen(code: string, now = Date.now()): boolean {
+    if (code === this.lastCode && now - this.lastSeenAt < this.cooldownMs) {
+      this.lastSeenAt = now;
+      return true;
+    }
+    return this.busy;
+  }
+
   /** Libera el escáner tras confirmar o cancelar; el mismo código sigue en enfriamiento. */
   release(now = Date.now()): void {
     this.busy = false;

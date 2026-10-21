@@ -44,7 +44,7 @@ export function ScanScreen() {
       .then((reading) => {
         if (run !== ocrRunRef.current) return;
         const names = reading.names.map((c) => c.name);
-        setOcr({ status: names.length ? 'done' : 'empty', candidates: names, institution: reading.institution, role: reading.role });
+        setOcr({ status: names.length ? 'done' : 'empty', candidates: names, institution: reading.institution, role: reading.role, preview: reading.preview });
       })
       .catch(() => {
         if (run === ocrRunRef.current) setOcr({ ...OCR_IDLE, status: 'error' });
@@ -92,6 +92,8 @@ export function ScanScreen() {
     },
     [gate, openCandidate, settings.vibrate, settings.sound, ocrEnabled],
   );
+
+  const isBlocked = useCallback((text: string) => gate.seen(text), [gate]);
 
   const retryOcr = useCallback(() => runOcr(frameRef.current?.() ?? null), [runOcr]);
 
@@ -150,7 +152,15 @@ export function ScanScreen() {
   return (
     <section className="screen scan-screen" aria-labelledby="scan-title">
       <h1 id="scan-title" className="sr-only">Escanear</h1>
-      <QrCamera onDecode={onDecode} paused={!!candidate} flashKey={flashKey} frameRef={frameRef} onStarted={prewarm} />
+      <QrCamera
+        onDecode={onDecode}
+        paused={!!candidate}
+        flashKey={flashKey}
+        frameRef={frameRef}
+        onStarted={prewarm}
+        guide={settings.guideEnabled}
+        isBlocked={isBlocked}
+      />
 
       {toast && (
         <div key={toast.id} className={`toast toast-${toast.kind}`} role="status">

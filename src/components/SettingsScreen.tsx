@@ -56,6 +56,11 @@ export function SettingsScreen() {
           3.ª cargo. Se procesa en el teléfono: la imagen no se envía a ningún servicio ni se guarda. La primera vez descarga
           ~6 MB desde esta misma app.
         </small>
+        <Toggle label="Guía de encuadre de la credencial" checked={settings.guideEnabled} onChange={(v) => updateSettings({ guideEnabled: v })} />
+        <small className="muted">
+          Muestra dónde deben quedar el QR (naranja), el nombre (verde), la institución (naranja) y el cargo (azul), y espera a
+          que la credencial esté alineada y quieta antes de leerla.
+        </small>
         <Toggle label="Registrar institución y cargo" checked={settings.captureAffiliation} onChange={(v) => updateSettings({ captureAffiliation: v })} />
         <Toggle label="Vibrar al leer (Android)" checked={settings.vibrate} onChange={(v) => updateSettings({ vibrate: v })} />
         <Toggle label="Sonido al leer" checked={settings.sound} onChange={(v) => updateSettings({ sound: v })} />

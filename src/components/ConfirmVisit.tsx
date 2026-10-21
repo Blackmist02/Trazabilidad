@@ -12,9 +12,11 @@ export interface OcrState {
   candidates: string[];
   institution: string | null;
   role: string | null;
+  /** Miniatura de la zona leída (solo en memoria). */
+  preview: string | null;
 }
 
-export const OCR_IDLE: OcrState = { status: 'off', candidates: [], institution: null, role: null };
+export const OCR_IDLE: OcrState = { status: 'off', candidates: [], institution: null, role: null, preview: null };
 
 export interface Candidate {
   parsed: ParsedQr | null;
@@ -201,6 +203,12 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
                   </button>
                 ))}
               </div>
+            )}
+            {ocr.preview && (ocrStatus === 'done' || ocrStatus === 'empty') && (
+              <figure className="ocr-preview">
+                <img src={ocr.preview} alt="Zona de la credencial que leyó la app" />
+                <figcaption>Zona leída (no se guarda)</figcaption>
+              </figure>
             )}
             {ocrStatus === 'empty' && <span className="ocr-status">No se encontró un nombre legible. Acerca la credencial y vuelve a leer.</span>}
             {ocrStatus === 'error' && <span className="ocr-status">No se pudo usar el lector de texto en este dispositivo.</span>}

@@ -68,13 +68,15 @@ El QR de la credencial solo contiene un identificador, pero el nombre, la instit
 └──────────────────────────────┘
 ```
 
+**Guía de encuadre** (`src/lib/guide.ts`, activada por defecto): sobre la cámara se dibuja dónde debe quedar cada parte de la credencial: **QR en el cuadro naranja, nombre en la banda verde, institución en la naranja y cargo en la azul**. Con cada lectura del QR la app comprueba su tamaño, posición y giro e indica «Acerca la cámara», «Aleja un poco la cámara», «Centra el QR…» o «Endereza la credencial». Solo cuando el QR coincide con el cuadro en 3 lecturas seguidas (cámara quieta, imagen nítida) se captura el fotograma y se abre la confirmación. «Registrar sin alinear» permite seguir sin esperar. Se desactiva en *Ajustes → Guía de encuadre de la credencial*.
+
 Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo lee con OCR ([tesseract.js](https://github.com/naptha/tesseract.js), modelo en español) **dentro del teléfono** (`src/lib/ocr.ts`, `src/lib/ocrName.ts`):
 
 0. **Bajo el QR** (lo primero): zxing indica dónde está el QR. Se recorta la franja justo debajo, enderezada según los ejes del código (corrige giros e inclinación) y ampliada, y se lee línea a línea: nombre, institución y cargo. Las líneas no se unen aunque se toquen (en la credencial real la «g» del nombre baja hasta la institución). Si ahí no hay un nombre, se sigue con los pasos 1 y 2.
 1. **Ubicar el bloque**: lectura de texto disperso en toda la imagen. Se busca la línea que parece un nombre de persona y que tiene **dos líneas debajo** (institución y cargo). Esa estructura evita confundir la cabecera del evento con el nombre, o tomar la institución como apellido cuando las tres líneas tienen el mismo tamaño.
 2. **Releer ampliado**: se recorta solo ese bloque, se amplía y se lee línea a línea. Así se recuperan palabras cortadas o letras pequeñas o en cursiva. En orden: nombre, institución y cargo.
 3. «MARÍA JOSÉ» se escribe como «María José» y se corrigen minúsculas sueltas del OCR («PÉREZ soTO»). La institución y el cargo se guardan tal como están impresos.
-4. Los tres campos aparecen rellenados en el formulario. El operador los verifica y pulsa «Registrar visita». «Volver a leer» captura otro fotograma.
+4. Los tres campos aparecen rellenados en el formulario, junto con una miniatura de la zona leída (solo en pantalla, no se guarda). El operador los verifica y pulsa «Registrar visita». «Volver a leer» captura otro fotograma.
 5. Se guarda con `name_source = 'ocr'`. La próxima vez que se escanee ese mismo código se proponen el nombre, la institución y el cargo ya confirmados, sin volver a hacer OCR.
 
 Con la foto de una credencial real de Edifica 2026 (tomada con la app en un iPhone) se obtienen los tres campos, también con la credencial girada ±12° o al revés; antes de este paso la app leía «Ela». En credenciales de prueba con el QR debajo, de distintos tamaños, tipografías e inclinaciones, también se obtienen los tres campos. Tarda ~0,2–0,5 s en un computador. En un teléfono tarda más, y con luz o enfoque deficientes la lectura puede fallar: el operador siempre puede corregir.
@@ -97,7 +99,7 @@ El ejemplo real `BDFFE48F81E448617430250Enp` es un **identificador opaco**. No h
 ```bash
 npm ci
 npm run dev        # http://localhost:5173/Trazabilidad/ (localhost permite la cámara)
-npm test           # 88 pruebas (Vitest + Testing Library + fake-indexeddb)
+npm test           # 93 pruebas (Vitest + Testing Library + fake-indexeddb)
 npm run build      # tsc + vite build → dist/
 ```
 

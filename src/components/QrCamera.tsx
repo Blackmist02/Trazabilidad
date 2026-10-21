@@ -2,6 +2,7 @@ import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
 import type { Result } from '@zxing/library';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkCameraSupport, mapCameraError, type CameraError } from '../lib/camera';
+import { AlignmentStreak, checkAlignment, GUIDE, HINT_TEXT, type AlignmentHint } from '../lib/guide';
 import { captureVideoFrame, type CapturedFrame } from '../lib/ocr';
 import type { Point, QrLocation } from '../lib/ocrName';
 
@@ -17,11 +18,17 @@ interface Props {
   frameRef?: { current: (() => CapturedFrame | null) | null };
   /** Se invoca cuando la cámara empieza a mostrar imagen. */
   onStarted?: () => void;
+  /** Guía de encuadre: solo se entrega la lectura cuando el QR coincide con el cuadro naranja. */
+  guide?: boolean;
+  /** ¿Este código está bloqueado (ya registrado y aún a la vista)? Entonces no se muestran indicaciones. */
+  isBlocked?: (text: string) => boolean;
 }
 
 const DEVICE_KEY = 'trazabilidad.cameraDevice';
 /** La posición del QR se usa solo si es reciente: la credencial puede haberse movido. */
 const QR_POSITION_MAX_AGE_MS = 1500;
+/** Sin ver el QR durante este tiempo se ocultan las indicaciones de encuadre. */
+const QR_LOST_MS = 800;
 
 /** Posición del QR en píxeles del vídeo (zxing: inferior izquierdo, superior izquierdo, superior derecho). */
 function qrLocation(result: Result): QrLocation | null {
@@ -31,8 +38,16 @@ function qrLocation(result: Result): QrLocation | null {
   return { bottomLeft: pt(0), topLeft: pt(1), topRight: pt(2) };
 }
 
-export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Props) {
+export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted, guide = false, isBlocked }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const guideRef = useRef(guide);
+  guideRef.current = guide;
+  const isBlockedRef = useRef(isBlocked);
+  isBlockedRef.current = isBlocked;
+  const streakRef = useRef(new AlignmentStreak());
+  const lastTextRef = useRef<{ text: string; at: number } | null>(null);
+  const [hint, setHint] = useState<AlignmentHint | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const onDecodeRef = useRef(onDecode);
   const pausedRef = useRef(paused);
@@ -74,6 +89,7 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
   }, [frameRef]);
 
   const stop = useCallback(() => {
+    setHint(null);
     controlsRef.current?.stop();
     controlsRef.current = null;
     setState((s) => (s === 'error' ? s : 'idle'));
@@ -100,15 +116,44 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
         audio: false,
         video: preferredDevice
           ? { deviceId: { exact: preferredDevice } }
-          : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       };
       try {
         const controls = await reader.decodeFromConstraints(constraints, video, (result) => {
-          if (!result) return;
+          const now = Date.now();
+          if (!result) {
+            if (lastTextRef.current && now - lastTextRef.current.at > QR_LOST_MS) {
+              lastTextRef.current = null;
+              streakRef.current.reset();
+              setHint(null);
+            }
+            return;
+          }
+          const text = result.getText();
+          lastTextRef.current = { text, at: now };
           // Se sigue anotando la posición con la confirmación abierta, para «Volver a leer».
           const location = qrLocation(result);
-          lastQrRef.current = location ? { at: Date.now(), location } : null;
-          if (!pausedRef.current) onDecodeRef.current(result.getText());
+          lastQrRef.current = location ? { at: now, location } : null;
+          if (!guideRef.current) {
+            if (!pausedRef.current) onDecodeRef.current(text);
+            return;
+          }
+          if (pausedRef.current || isBlockedRef.current?.(text)) {
+            streakRef.current.reset();
+            setHint(null);
+            return;
+          }
+          const rect = viewportRef.current?.getBoundingClientRect();
+          const next =
+            location && rect?.width && video.videoWidth
+              ? checkAlignment(location, { width: video.videoWidth, height: video.videoHeight }, rect).hint
+              : 'center';
+          setHint(next);
+          // Varias lecturas alineadas seguidas: la cámara está quieta y la imagen saldrá nítida.
+          if (streakRef.current.push(next === 'ok', now)) {
+            setHint(null);
+            onDecodeRef.current(text);
+          }
         });
         controlsRef.current = controls;
         setState('scanning');
@@ -154,12 +199,24 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
   };
 
   const active = state === 'scanning' || state === 'starting';
+  const showGuide = active && guide && !paused;
+
+  /** Registra el código a la vista aunque la credencial no esté alineada. */
+  const acceptUnaligned = () => {
+    const last = lastTextRef.current;
+    if (!last) return;
+    streakRef.current.reset();
+    setHint(null);
+    onDecodeRef.current(last.text);
+  };
 
   return (
     <div className="camera">
-      <div className={`viewport ${active ? 'is-active' : ''}`}>
+      <div ref={viewportRef} className={`viewport ${active ? 'is-active' : ''}`}>
         <video ref={videoRef} className="viewport-video" muted playsInline aria-label="Vista de la cámara" />
-        {active && <div className="reticle" aria-hidden="true" />}
+        {active && !guide && <div className="reticle" aria-hidden="true" />}
+        {showGuide && <GuideOverlay aligned={hint === 'ok'} />}
+        {showGuide && hint && <div className={`guide-hint ${hint === 'ok' ? 'is-ok' : ''}`}>{HINT_TEXT[hint]}</div>}
         {flashKey > 0 && <div key={flashKey} className="flash" aria-hidden="true" />}
         {!active && (
           <div className="viewport-overlay">
@@ -180,9 +237,29 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
         <span className={`dot dot-${state}`} />
         {state === 'idle' && 'Pulsa «Iniciar cámara» para escanear.'}
         {state === 'starting' && 'Solicitando acceso a la cámara…'}
-        {state === 'scanning' && (paused ? 'Lectura en pausa.' : 'Apunta al código QR de la credencial.')}
+        {state === 'scanning' &&
+          (paused
+            ? 'Lectura en pausa.'
+            : guide
+              ? 'Pon el QR en el cuadro naranja y el nombre en la banda verde.'
+              : 'Apunta al código QR de la credencial.')}
         {state === 'error' && 'La cámara no está disponible.'}
       </div>
+
+      {showGuide && (
+        <ul className="guide-legend" aria-label="Guía de encuadre">
+          <li><span className="swatch swatch-qr" /> QR</li>
+          <li><span className="swatch swatch-name" /> Nombre</li>
+          <li><span className="swatch swatch-institution" /> Institución</li>
+          <li><span className="swatch swatch-role" /> Cargo</li>
+        </ul>
+      )}
+
+      {showGuide && hint && hint !== 'ok' && (
+        <button type="button" className="btn btn-ghost btn-sm" onClick={acceptUnaligned}>
+          Registrar sin alinear
+        </button>
+      )}
 
       <div className="row">
         {active ? (
@@ -209,6 +286,28 @@ export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Pr
           </select>
         </label>
       )}
+    </div>
+  );
+}
+
+const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+
+/**
+ * Cuadro del QR y bandas de las tres líneas, en la posición que tendrían en una credencial
+ * alineada. Las medidas son fracciones del ancho del visor (el contenedor es cuadrado).
+ */
+function GuideOverlay({ aligned }: { aligned: boolean }) {
+  const { qrSide: q, qrCenter: [cx, cy], bandWidth, bands } = GUIDE;
+  return (
+    <div className={`guide ${aligned ? 'is-aligned' : ''}`} aria-hidden="true">
+      <div className="guide-box guide-qr" style={{ left: pct(cx - q / 2), top: pct(cy - q / 2), width: pct(q), height: pct(q) }} />
+      {bands.map((b) => (
+        <div
+          key={b.key}
+          className={`guide-box guide-${b.key}`}
+          style={{ left: pct(cx - (bandWidth * q) / 2), width: pct(bandWidth * q), top: pct(cy + b.from * q), height: pct((b.to - b.from) * q) }}
+        />
+      ))}
     </div>
   );
 }
