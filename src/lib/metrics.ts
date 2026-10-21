@@ -29,6 +29,40 @@ export interface Metrics {
   lastVisit: Visit | null;
   /** Visitas por hora local, con acumulado, para ver la evolución de la afluencia. */
   timeline: TimelinePoint[];
+  /** Instituciones ordenadas por número de visitas. */
+  byInstitution: InstitutionCount[];
+  /** Visitas con institución registrada. */
+  withInstitution: number;
+}
+
+export interface InstitutionCount {
+  /** Forma de escritura más frecuente. */
+  name: string;
+  visits: number;
+  /** Códigos QR distintos de esa institución. */
+  codes: number;
+}
+
+/** Agrupa por institución sin distinguir mayúsculas, tildes ni espacios ("CODELCO" = "Codelco"). */
+export function groupInstitutions(visits: Visit[]): InstitutionCount[] {
+  const groups = new Map<string, { spellings: Map<string, number>; visits: number; codes: Set<string> }>();
+  for (const v of visits) {
+    const raw = v.attendee_institution?.trim();
+    if (!raw) continue;
+    const key = normalizeName(raw).replace(/[^\p{L}\p{N} ]/gu, '');
+    const g = groups.get(key) ?? { spellings: new Map<string, number>(), visits: 0, codes: new Set<string>() };
+    g.spellings.set(raw, (g.spellings.get(raw) ?? 0) + 1);
+    g.visits++;
+    if (v.qr_identifier) g.codes.add(v.qr_identifier);
+    groups.set(key, g);
+  }
+  return [...groups.values()]
+    .map((g) => ({
+      name: [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0],
+      visits: g.visits,
+      codes: g.codes.size,
+    }))
+    .sort((a, b) => b.visits - a.visits || a.name.localeCompare(b.name, 'es'));
 }
 
 export function normalizeName(name: string): string {
@@ -93,5 +127,7 @@ export function computeMetrics(visits: Visit[], timeZone: string): Metrics {
     byDay: [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })),
     lastVisit: sorted.length ? sorted[sorted.length - 1] : null,
     timeline,
+    byInstitution: groupInstitutions(sorted),
+    withInstitution: sorted.filter((v) => v.attendee_institution?.trim()).length,
   };
 }

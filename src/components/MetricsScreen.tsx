@@ -96,6 +96,30 @@ export function MetricsScreen() {
             />
           </div>
 
+          {m.byInstitution.length > 0 && (
+            <div className="card">
+              <h2 className="card-title">Visitas por institución</h2>
+              <ol className="rank">
+                {m.byInstitution.slice(0, 10).map((it) => (
+                  <li key={it.name}>
+                    <span className="rank-name">{it.name}</span>
+                    <span className="rank-bar" aria-hidden="true">
+                      <span style={{ width: `${(it.visits / m.byInstitution[0].visits) * 100}%` }} />
+                    </span>
+                    <span className="rank-value">
+                      {it.visits}
+                      {it.codes !== it.visits && <small> · {it.codes} cód.</small>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <small className="muted">
+                {m.withInstitution} de {m.totalVisits} visitas tienen institución
+                {m.byInstitution.length > 10 ? ` · ${m.byInstitution.length} instituciones en total` : ''}.
+              </small>
+            </div>
+          )}
+
           <details className="card">
             <summary>Ver tabla por hora</summary>
             <table className="table">

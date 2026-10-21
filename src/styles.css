@@ -207,6 +207,8 @@ textarea { min-height: 64px; resize: vertical; }
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0.6; } }
 .sheet-handle { width: 40px; height: 4px; border-radius: 4px; background: var(--border); margin: 4px auto; }
 .sheet-actions { display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--surface); padding-top: 4px; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 360px) { .field-pair { grid-template-columns: 1fr; } }
 .ocr-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -4px; }
 .ocr-status { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-2); flex: 1 1 100%; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
@@ -275,3 +277,11 @@ textarea { min-height: 64px; resize: vertical; }
 .line-labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--muted); }
 .table { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .table th, .table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.visit-org { font-size: 0.82rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.rank li { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 0.875rem; }
+.rank-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-bar { height: 10px; background: var(--surface-2); border-radius: 0 4px 4px 0; overflow: hidden; }
+.rank-bar > span { display: block; height: 100%; background: var(--series); border-radius: 0 4px 4px 0; }
+.rank-value { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; min-width: 2.5em; }
+.rank-value small { font-weight: 400; color: var(--muted); }

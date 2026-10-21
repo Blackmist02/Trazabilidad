@@ -50,11 +50,13 @@ export function SettingsScreen() {
           <input type="number" min={1} max={60} inputMode="numeric" value={settings.cooldownSeconds} onChange={(e) => updateSettings({ cooldownSeconds: Number(e.target.value) })} />
           <small className="muted">Evita registros accidentales mientras la credencial sigue frente a la cámara.</small>
         </label>
-        <Toggle label="Leer el nombre impreso en la credencial (OCR)" checked={settings.ocrEnabled} onChange={(v) => updateSettings({ ocrEnabled: v })} />
+        <Toggle label="Leer la credencial con la cámara (OCR)" checked={settings.ocrEnabled} onChange={(v) => updateSettings({ ocrEnabled: v })} />
         <small className="muted">
-          Al detectar el QR se analiza la misma imagen para proponer el nombre. Se procesa en el teléfono: la imagen no se
-          envía a ningún servicio ni se guarda. La primera vez descarga ~6 MB desde esta misma app.
+          Al detectar el QR se analiza la misma imagen. Formato esperado: 1.ª línea nombre y apellido, 2.ª institución,
+          3.ª cargo. Se procesa en el teléfono: la imagen no se envía a ningún servicio ni se guarda. La primera vez descarga
+          ~6 MB desde esta misma app.
         </small>
+        <Toggle label="Registrar institución y cargo" checked={settings.captureAffiliation} onChange={(v) => updateSettings({ captureAffiliation: v })} />
         <Toggle label="Vibrar al leer (Android)" checked={settings.vibrate} onChange={(v) => updateSettings({ vibrate: v })} />
         <Toggle label="Sonido al leer" checked={settings.sound} onChange={(v) => updateSettings({ sound: v })} />
         <Toggle label="Conservar el contenido original del QR (URLs y textos)" checked={settings.storePayload} onChange={(v) => updateSettings({ storePayload: v })} />

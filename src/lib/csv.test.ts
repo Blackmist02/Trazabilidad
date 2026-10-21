@@ -29,7 +29,7 @@ describe('exportación CSV', () => {
 
   it('incluye BOM UTF-8, encabezados y filas en orden cronológico', () => {
     const csv = visitsToCsv([a, b], TZ, ',');
-    expect(csv.startsWith('﻿"Nombre","Estado","Identificador QR"')).toBe(true);
+    expect(csv.startsWith('﻿"Nombre","Institución","Cargo","Estado","Identificador QR"')).toBe(true);
     const lines = csv.trim().split('\r\n');
     expect(lines).toHaveLength(3);
     expect(lines[1]).toContain('"Pendiente de nombre"'); // b es anterior
@@ -46,7 +46,7 @@ describe('exportación CSV', () => {
 
   it('usa el separador elegido', () => {
     const csv = visitsToCsv([a], TZ, ';');
-    expect(csv.split('\r\n')[0]).toContain('"Nombre";"Estado"');
+    expect(csv.split('\r\n')[0]).toContain('"Nombre";"Institución";"Cargo";"Estado"');
   });
 
   it('escapa comillas y valores nulos', () => {

@@ -12,8 +12,9 @@
 | Observaciones | Opcional; no anotes datos sensibles (salud, religión, etc.). |
 
 | Origen del nombre | Trazabilidad: si lo escribió el operador, venía en el QR, se leyó de la credencial (OCR) o se tomó de una visita anterior. |
+| Institución y cargo | Opcionales; impresos en la credencial (2.ª y 3.ª línea). Permiten saber qué instituciones visitan el stand. Se pueden desactivar en Ajustes. |
 
-**Lectura de la credencial (OCR):** se analiza en el propio teléfono el fotograma en que se detectó el QR para proponer el nombre impreso. La imagen se descarta en el momento: no se guarda, no se exporta y no se envía a ningún servicio. Solo se conserva el nombre que el operador confirma.
+**Lectura de la credencial (OCR):** se analiza en el propio teléfono el fotograma en que se detectó el QR para proponer el nombre, la institución y el cargo impresos. La imagen se descarta en el momento: no se guarda, no se exporta y no se envía a ningún servicio. Solo se conservan los datos que el operador confirma.
 
 **No se recogen**: ubicación GPS, huella del dispositivo, fotos, datos de contacto ni información de terceros. Los códigos QR **no** se envían a ningún servicio para descifrarlos y las URL de los QR **no** se abren. La app no escribe nombres ni identificadores en los registros técnicos (consola).
 

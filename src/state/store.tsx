@@ -5,7 +5,7 @@ import { supabaseRemote } from '../data/remote';
 import { getSupabase } from '../data/supabaseClient';
 import { resetPullCursor, retryDelayMs, syncOnce, type SyncPhase } from '../data/sync';
 import { loadSettings, normalizeSettings, saveSettings, syncConfigured, type Settings } from '../lib/settings';
-import { applyEdit, type Visit } from '../lib/visits';
+import { applyEdit, type Visit, type VisitChangesInput } from '../lib/visits';
 
 export interface SyncStatus {
   phase: SyncPhase;
@@ -21,7 +21,7 @@ interface AppContextValue {
   loading: boolean;
   storageError: string | null;
   addVisit: (visit: Visit) => Promise<void>;
-  editVisit: (id: string, changes: { attendee_name?: string | null; notes?: string | null }) => Promise<Visit | null>;
+  editVisit: (id: string, changes: VisitChangesInput) => Promise<Visit | null>;
   clearLocal: (options: { keepPending: boolean }) => Promise<number>;
   queueLocalForUpload: () => Promise<number>;
   online: boolean;
@@ -167,7 +167,7 @@ export function AppProvider({ children, store: injectedStore }: { children: Reac
   );
 
   const editVisit = useCallback(
-    async (id: string, changes: { attendee_name?: string | null; notes?: string | null }) => {
+    async (id: string, changes: VisitChangesInput) => {
       const current = await store.get(id);
       if (!current) return null;
       const next = applyEdit(current, changes);

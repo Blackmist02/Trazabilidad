@@ -1,5 +1,5 @@
 import type { Worker } from 'tesseract.js';
-import type { OcrLine } from './ocrName';
+import { analyzeBadge, mergeBlockReading, type BadgeReading, type Box, type OcrLine } from './ocrName';
 
 /**
  * OCR en el propio dispositivo con tesseract.js (WebAssembly).
@@ -8,14 +8,16 @@ import type { OcrLine } from './ocrName';
  */
 
 let workerPromise: Promise<Worker> | null = null;
+// Las lecturas se ejecutan de una en una: cada una cambia parámetros del worker.
+let queue: Promise<unknown> = Promise.resolve();
 
 function assetUrl(path: string): string {
   return new URL(`${import.meta.env.BASE_URL}ocr/${path}`, window.location.href).href;
 }
 
 async function createOcrWorker(): Promise<Worker> {
-  const { createWorker, OEM, PSM } = await import('tesseract.js');
-  const worker = await createWorker('spa', OEM.LSTM_ONLY, {
+  const { createWorker, OEM } = await import('tesseract.js');
+  return createWorker('spa', OEM.LSTM_ONLY, {
     workerPath: assetUrl('worker.min.js'),
     corePath: assetUrl(''),
     langPath: assetUrl('').replace(/\/$/, ''),
@@ -24,10 +26,6 @@ async function createOcrWorker(): Promise<Worker> {
     // Guarda el modelo de idioma en IndexedDB para no descargarlo de nuevo.
     cacheMethod: 'write',
   });
-  // Texto disperso: las credenciales tienen bloques sueltos de distinto tamaño.
-  // user_defined_dpi evita que tesseract estime la resolución en cada imagen (y lo anote en la consola).
-  await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
-  return worker;
 }
 
 /** Inicia (una sola vez) la carga del motor OCR. */
@@ -43,8 +41,9 @@ export function ocrSupported(): boolean {
   return typeof WebAssembly === 'object' && typeof Worker !== 'undefined';
 }
 
-export async function recognizeLines(image: HTMLCanvasElement): Promise<OcrLine[]> {
-  const worker = await prewarmOcr();
+async function recognize(worker: Worker, image: HTMLCanvasElement, psm: string): Promise<OcrLine[]> {
+  // user_defined_dpi evita que tesseract estime la resolución en cada imagen (y lo anote en la consola).
+  await worker.setParameters({ tessedit_pageseg_mode: psm as never, user_defined_dpi: '300' });
   const { data } = await worker.recognize(image, {}, { blocks: true, text: false });
   const lines: OcrLine[] = [];
   for (const block of data.blocks ?? []) {
@@ -57,6 +56,42 @@ export async function recognizeLines(image: HTMLCanvasElement): Promise<OcrLine[
     }
   }
   return lines;
+}
+
+/** Recorta la zona indicada (con margen) y la amplía para que el nombre mida ~56 px de alto. */
+function cropBlock(frame: HTMLCanvasElement, block: Box, nameHeight: number): HTMLCanvasElement | null {
+  const m = nameHeight * 0.6;
+  const left = Math.max(0, block.left - 2 * m);
+  const top = Math.max(0, block.top - m);
+  const right = Math.min(frame.width, block.right + 2 * m);
+  const bottom = Math.min(frame.height, block.bottom + m);
+  const scale = Math.min(3, Math.max(1, 56 / Math.max(1, nameHeight)));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round((right - left) * scale);
+  canvas.height = Math.round((bottom - top) * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !canvas.width || !canvas.height) return null;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(frame, left, top, right - left, bottom - top, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/**
+ * Lee la credencial en dos pasadas:
+ * 1. Texto disperso en todo el fotograma para ubicar el bloque nombre / institución / cargo.
+ * 2. Relectura del bloque recortado y ampliado, línea a línea, para mayor precisión.
+ */
+export function readBadge(frame: HTMLCanvasElement, extraStopwords: string[]): Promise<BadgeReading> {
+  const job = queue.then(async () => {
+    const worker = await prewarmOcr();
+    const first = analyzeBadge(await recognize(worker, frame, '11'), extraStopwords);
+    if (!first.block) return first;
+    const crop = cropBlock(frame, first.block, first.nameHeight);
+    if (!crop) return first;
+    return mergeBlockReading(first, await recognize(worker, crop, '6'), extraStopwords);
+  });
+  queue = job.catch(() => undefined);
+  return job;
 }
 
 /**

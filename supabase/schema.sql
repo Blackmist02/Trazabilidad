@@ -88,6 +88,13 @@ alter table public.visits drop constraint if exists visits_name_source_check;
 alter table public.visits add constraint visits_name_source_check
   check (name_source is null or name_source in ('manual', 'qr', 'ocr', 'previous'));
 
+-- Institución y cargo (2.ª y 3.ª línea de la credencial).
+alter table public.visits add column if not exists attendee_institution text;
+alter table public.visits add column if not exists attendee_role text;
+alter table public.visits drop constraint if exists visits_affiliation_length_check;
+alter table public.visits add constraint visits_affiliation_length_check
+  check (char_length(coalesce(attendee_institution, '')) <= 120 and char_length(coalesce(attendee_role, '')) <= 120);
+
 -- Sin política DELETE: el borrado solo es posible desde el panel de administración.
 revoke all on public.visits from anon;
 grant select, insert, update on public.visits to authenticated;
@@ -137,6 +144,14 @@ begin
   if new.attendee_name is distinct from old.attendee_name then
     insert into public.visit_audit (visit_id, stand_id, field, old_value, new_value, changed_by)
     values (old.id, old.stand_id, 'attendee_name', old.attendee_name, new.attendee_name, auth.uid());
+  end if;
+  if new.attendee_institution is distinct from old.attendee_institution then
+    insert into public.visit_audit (visit_id, stand_id, field, old_value, new_value, changed_by)
+    values (old.id, old.stand_id, 'attendee_institution', old.attendee_institution, new.attendee_institution, auth.uid());
+  end if;
+  if new.attendee_role is distinct from old.attendee_role then
+    insert into public.visit_audit (visit_id, stand_id, field, old_value, new_value, changed_by)
+    values (old.id, old.stand_id, 'attendee_role', old.attendee_role, new.attendee_role, auth.uid());
   end if;
   if new.notes is distinct from old.notes then
     insert into public.visit_audit (visit_id, stand_id, field, old_value, new_value, changed_by)

@@ -9,7 +9,7 @@ Aplicación web móvil (PWA) para registrar el paso de los asistentes por un sta
 | Sección | Qué hace |
 |---|---|
 | **Escanear** | Cámara trasera (con selector si hay varias), estado de permisos y errores, iniciar/detener, entrada manual del código, registro sin código, vibración/sonido y destello al leer. Una misma lectura no se procesa dos veces (filtro por fotogramas + enfriamiento configurable). |
-| **Confirmación** | Nombre (propuesto solo si el QR lo trae explícitamente o si el mismo código ya tenía nombre), identificador, fecha/hora automática no editable, observaciones opcionales, aviso de visitas previas. Sin nombre queda «pendiente de completar». |
+| **Confirmación** | Nombre, institución y cargo (leídos de la credencial impresa o de una visita anterior del mismo código; el nombre también del QR si lo trae), identificador, fecha/hora automática no editable, observaciones opcionales, aviso de visitas previas. Sin nombre queda «pendiente de completar». |
 | **Historial** | Lista cronológica, búsqueda por nombre/código, filtro por fecha, solo pendientes, detalle, corrección de nombre con historial de cambios, totales del día, exportación CSV de lo filtrado. |
 | **Métricas** | Visitas, códigos únicos (estimación de visitantes), repetidas, con nombre, sin nombre, sin identificador, por hora, por día, última visita y evolución acumulada. |
 | **Ajustes** | Evento, stand, zona horaria, política de duplicados, modo de almacenamiento (local / sincronizado), conexión e inicio de sesión de Supabase, exportación completa, aviso de privacidad, borrado de datos locales. |
@@ -54,16 +54,31 @@ React 19 + TypeScript + Vite 8 (SPA estática, navegación por hash → sin 404 
 
 > ⚠️ Safari puede borrar los datos de sitios web que no se usen durante 7 días. En modo local, exporta el CSV al final de cada jornada.
 
-## Lectura del nombre impreso en la credencial (OCR)
+## Lectura de la credencial (OCR)
 
-Muchas credenciales llevan el nombre **impreso**, pero el QR solo contiene un identificador. Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo analiza con OCR ([tesseract.js](https://github.com/naptha/tesseract.js), modelo en español) **dentro del teléfono**:
+El QR de la credencial solo contiene un identificador, pero el nombre, la institución y el cargo van **impresos**:
 
-1. Se buscan las líneas que parecen un nombre (solo letras, 1–5 palabras) y se descartan el nombre del evento, la empresa, el tipo de pase, cargos, fechas, correos y URLs (`src/lib/ocrName.ts`).
-2. Se elige la línea con la letra más grande. Si nombre y apellidos están en dos líneas seguidas del mismo tamaño, se unen. «MARÍA JOSÉ» se convierte en «María José».
-3. El nombre aparece escrito en el formulario y las otras lecturas como botones para elegir. El operador lo verifica y pulsa «Registrar visita». «Volver a leer» captura otro fotograma.
-4. Se guarda en `attendee_name` con `name_source = 'ocr'`. La próxima vez que se escanee ese mismo código, el nombre se propone automáticamente (`name_source = 'previous'`) sin volver a hacer OCR.
+```
+┌──────────────────────────────┐
+│  (cabecera del evento)       │
+│  Nombre y apellido           │  ← 1.ª línea  → attendee_name
+│  Institución                 │  ← 2.ª línea  → attendee_institution
+│  Cargo en la institución     │  ← 3.ª línea  → attendee_role
+│            [QR]              │
+└──────────────────────────────┘
+```
 
-Privacidad: la imagen no se guarda ni se envía a ningún servicio. Los archivos del OCR (~6 MB) se sirven desde la propia app (`public/ocr`, copiados en `npm run build`), se descargan al iniciar la cámara por primera vez y quedan en caché para funcionar sin conexión. Se puede desactivar en *Ajustes → Leer el nombre impreso en la credencial*.
+Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo lee con OCR ([tesseract.js](https://github.com/naptha/tesseract.js), modelo en español) **dentro del teléfono**, en dos pasadas (`src/lib/ocr.ts`, `src/lib/ocrName.ts`):
+
+1. **Ubicar el bloque**: lectura de texto disperso en toda la imagen. Se busca la línea que parece un nombre de persona y que tiene **dos líneas debajo** (institución y cargo). Esa estructura evita confundir la cabecera del evento con el nombre, o tomar la institución como apellido cuando las tres líneas tienen el mismo tamaño.
+2. **Releer ampliado**: se recorta solo ese bloque, se amplía y se lee línea a línea. Así se recuperan palabras cortadas o letras pequeñas o en cursiva. En orden: nombre, institución y cargo.
+3. «MARÍA JOSÉ» se escribe como «María José» y se corrigen minúsculas sueltas del OCR («PÉREZ soTO»). La institución y el cargo se guardan tal como están impresos.
+4. Los tres campos aparecen rellenados en el formulario. El operador los verifica y pulsa «Registrar visita». «Volver a leer» captura otro fotograma.
+5. Se guarda con `name_source = 'ocr'`. La próxima vez que se escanee ese mismo código se proponen el nombre, la institución y el cargo ya confirmados, sin volver a hacer OCR.
+
+En credenciales de prueba con este formato, de distintos tamaños, tipografías e inclinaciones, se obtuvieron correctamente los tres campos en todas, en ~0,5 s en un computador. En un teléfono tarda más, y con luz o enfoque deficientes la lectura puede fallar: el operador siempre puede corregir.
+
+Privacidad: la imagen no se guarda ni se envía a ningún servicio. Los archivos del OCR (~6 MB) se sirven desde la propia app (`public/ocr`, copiados en `npm run build`), se descargan al iniciar la cámara por primera vez y quedan en caché para funcionar sin conexión. Se puede desactivar en *Ajustes → Leer la credencial con la cámara*, y la institución y el cargo en *Ajustes → Registrar institución y cargo*.
 
 Prioridad del nombre: el QR (si lo trae explícito) va primero, luego una visita anterior confirmada del mismo código, luego el OCR y, por último, el nombre escrito a mano.
 
@@ -81,7 +96,7 @@ El ejemplo real `BDFFE48F81E448617430250Enp` es un **identificador opaco**. No h
 ```bash
 npm ci
 npm run dev        # http://localhost:5173/Trazabilidad/ (localhost permite la cámara)
-npm test           # 71 pruebas (Vitest + Testing Library + fake-indexeddb)
+npm test           # 79 pruebas (Vitest + Testing Library + fake-indexeddb)
 npm run build      # tsc + vite build → dist/
 ```
 

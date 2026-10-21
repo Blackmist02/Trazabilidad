@@ -19,6 +19,8 @@ export interface Settings {
   storePayload: boolean;
   /** Leer el nombre impreso en la credencial con OCR en el dispositivo. */
   ocrEnabled: boolean;
+  /** Registrar institución y cargo (2.ª y 3.ª línea de la credencial). */
+  captureAffiliation: boolean;
   vibrate: boolean;
   sound: boolean;
   privacyNotice: string;
@@ -38,9 +40,10 @@ export const DEFAULT_SETTINGS: Settings = {
   cooldownSeconds: 5,
   storePayload: true,
   ocrEnabled: true,
+  captureAffiliation: true,
   vibrate: true,
   sound: false,
-  privacyNotice: 'Registramos tu nombre y la hora de tu visita a nuestro stand para medir la afluencia. No compartimos estos datos con terceros.',
+  privacyNotice: 'Registramos tu nombre, institución, cargo y la hora de tu visita a nuestro stand para medir la afluencia. No compartimos estos datos con terceros.',
   csvSeparator: ';',
 };
 

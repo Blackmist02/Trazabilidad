@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { MAX_AFFILIATION_LENGTH } from '../lib/ocrName';
 import { MAX_NAME_LENGTH, NAME_SOURCE_LABEL, QR_KIND_LABEL, type ParsedQr } from '../lib/qr';
 import { formatLocalDate, formatLocalTime, formatLocalTimeShort } from '../lib/time';
 import { MAX_NOTES_LENGTH, type NameSource, type PreviousVisits } from '../lib/visits';
@@ -9,7 +10,11 @@ export type OcrStatus = 'off' | 'running' | 'done' | 'empty' | 'error' | 'no-cam
 export interface OcrState {
   status: OcrStatus;
   candidates: string[];
+  institution: string | null;
+  role: string | null;
 }
+
+export const OCR_IDLE: OcrState = { status: 'off', candidates: [], institution: null, role: null };
 
 export interface Candidate {
   parsed: ParsedQr | null;
@@ -17,7 +22,17 @@ export interface Candidate {
   scannedAt: Date;
   previous: PreviousVisits;
   knownName: string | null;
+  knownInstitution: string | null;
+  knownRole: string | null;
   source: 'camera' | 'manual';
+}
+
+export interface ConfirmData {
+  name: string | null;
+  nameSource: NameSource;
+  institution: string | null;
+  role: string | null;
+  notes: string | null;
 }
 
 interface Props {
@@ -25,32 +40,40 @@ interface Props {
   timeZone: string;
   duplicatePolicy: DuplicatePolicy;
   privacyNotice: string;
-  onConfirm: (data: { name: string | null; nameSource: NameSource; notes: string | null }) => Promise<void>;
+  /** Mostrar y guardar institución y cargo. */
+  captureAffiliation: boolean;
+  onConfirm: (data: ConfirmData) => Promise<void>;
   onCancel: () => void;
-  /** Lectura del nombre impreso en la credencial; null si el OCR está desactivado. */
+  /** Lectura de la credencial; null si el OCR está desactivado. */
   ocr: OcrState | null;
   onRetryOcr: () => void;
 }
 
-export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNotice, onConfirm, onCancel, ocr, onRetryOcr }: Props) {
+export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNotice, captureAffiliation, onConfirm, onCancel, ocr, onRetryOcr }: Props) {
   const { parsed, previous } = candidate;
   const initialName = parsed?.suggestedName ?? candidate.knownName ?? '';
   const [name, setName] = useState(initialName);
   const [nameOrigin, setNameOrigin] = useState<NameSource>(
     parsed?.suggestedName ? 'qr' : candidate.knownName ? 'previous' : 'manual',
   );
-  const touchedRef = useRef(false);
+  const [institution, setInstitution] = useState(candidate.knownInstitution ?? '');
+  const [role, setRole] = useState(candidate.knownRole ?? '');
+  const touchedRef = useRef({ name: false, institution: false, role: false });
   const ocrStatus = ocr?.status ?? 'off';
   const ocrCandidates = ocr?.candidates ?? [];
 
-  // Autocompleta con la mejor lectura del OCR si el operador aún no escribió nada.
+  // Autocompleta con la lectura de la credencial los campos que el operador aún no tocó.
   useEffect(() => {
-    if (ocrStatus !== 'done' || !ocrCandidates.length) return;
-    if (touchedRef.current || name.trim()) return;
-    setName(ocrCandidates[0]);
-    setNameOrigin('ocr');
+    if (!ocr || ocrStatus !== 'done') return;
+    const touched = touchedRef.current;
+    if (ocrCandidates.length && !touched.name && !name.trim()) {
+      setName(ocrCandidates[0]);
+      setNameOrigin('ocr');
+    }
+    if (ocr.institution && !touched.institution && !institution.trim()) setInstitution(ocr.institution);
+    if (ocr.role && !touched.role && !role.trim()) setRole(ocr.role);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ocrStatus, ocrCandidates]);
+  }, [ocr]);
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -76,7 +99,13 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
     setSaving(true);
     setError(null);
     try {
-      await onConfirm({ name: trimmed || null, nameSource: nameOrigin, notes: notes.trim() || null });
+      await onConfirm({
+        name: trimmed || null,
+        nameSource: nameOrigin,
+        institution: captureAffiliation ? institution.trim() || null : null,
+        role: captureAffiliation ? role.trim() || null : null,
+        notes: notes.trim() || null,
+      });
     } catch {
       setError('No se pudo guardar el registro. Inténtalo de nuevo.');
       submittingRef.current = false;
@@ -96,7 +125,7 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
             : 'El código no contiene un nombre. Escríbelo o léelo de la credencial.';
 
   function pickName(value: string) {
-    touchedRef.current = true;
+    touchedRef.current.name = true;
     setName(value);
     setNameOrigin('ocr');
   }
@@ -149,7 +178,7 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
             enterKeyHint="done"
             placeholder="Nombre y apellido"
             onChange={(e) => {
-              touchedRef.current = true;
+              touchedRef.current.name = true;
               setName(e.target.value);
               setNameOrigin('manual');
             }}
@@ -164,7 +193,7 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
                 <span className="spinner" aria-hidden="true" /> Leyendo la credencial…
               </span>
             )}
-            {ocrStatus === 'done' && ocrCandidates.length > 0 && (
+            {ocrStatus === 'done' && ocrCandidates.length > 1 && (
               <div className="chips" role="group" aria-label="Nombres leídos en la credencial">
                 {ocrCandidates.map((c) => (
                   <button key={c} type="button" className={`chip ${c === trimmed ? 'is-on' : ''}`} onClick={() => pickName(c)}>
@@ -181,6 +210,41 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
                 {ocrStatus === 'off' ? 'Leer nombre de la credencial' : 'Volver a leer'}
               </button>
             )}
+          </div>
+        )}
+
+        {captureAffiliation && (
+          <div className="field-pair">
+            <label className="field">
+              <span>Institución</span>
+              <input
+                type="text"
+                value={institution}
+                maxLength={MAX_AFFILIATION_LENGTH}
+                autoComplete="off"
+                autoCapitalize="words"
+                placeholder="Opcional"
+                onChange={(e) => {
+                  touchedRef.current.institution = true;
+                  setInstitution(e.target.value);
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Cargo</span>
+              <input
+                type="text"
+                value={role}
+                maxLength={MAX_AFFILIATION_LENGTH}
+                autoComplete="off"
+                autoCapitalize="sentences"
+                placeholder="Opcional"
+                onChange={(e) => {
+                  touchedRef.current.role = true;
+                  setRole(e.target.value);
+                }}
+              />
+            </label>
           </div>
         )}
 

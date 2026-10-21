@@ -19,6 +19,8 @@ export function csvCell(value: string | number | null | undefined): string {
 
 export const CSV_HEADERS = [
   'Nombre',
+  'Institución',
+  'Cargo',
   'Estado',
   'Identificador QR',
   'Tipo de código',
@@ -38,6 +40,8 @@ export function visitsToCsv(visits: Visit[], timeZone: string, separator: CsvSep
     .map((v) =>
       [
         v.attendee_name,
+        v.attendee_institution ?? null,
+        v.attendee_role ?? null,
         v.attendee_name ? 'Identificado' : 'Pendiente de nombre',
         v.qr_identifier,
         v.qr_kind,

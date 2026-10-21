@@ -1,16 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { fetchAudit, type AuditEntry } from '../data/remote';
+import { MAX_AFFILIATION_LENGTH } from '../lib/ocrName';
 import { MAX_NAME_LENGTH, QR_KIND_LABEL, type QrKind } from '../lib/qr';
 import { formatLocalDateTime } from '../lib/time';
 import { MAX_NOTES_LENGTH, NAME_SOURCE_TEXT, type Visit } from '../lib/visits';
 import { useApp } from '../state/store';
 
-const FIELD_LABEL: Record<string, string> = { attendee_name: 'Nombre', notes: 'Observaciones' };
+const FIELD_LABEL: Record<string, string> = {
+  attendee_name: 'Nombre',
+  attendee_institution: 'Institución',
+  attendee_role: 'Cargo',
+  notes: 'Observaciones',
+};
 
 export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => void }) {
   const { settings, editVisit, supabase, session } = useApp();
   const [name, setName] = useState(visit.attendee_name ?? '');
   const [notes, setNotes] = useState(visit.notes ?? '');
+  const [institution, setInstitution] = useState(visit.attendee_institution ?? '');
+  const [role, setRole] = useState(visit.attendee_role ?? '');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
@@ -27,13 +35,17 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
     };
   }, [supabase, session, visit.id, visit.sync_state, visit.updated_at]);
 
-  const changed = (name.trim() || null) !== visit.attendee_name || (notes.trim() || null) !== visit.notes;
+  const changed =
+    (name.trim() || null) !== visit.attendee_name ||
+    (notes.trim() || null) !== visit.notes ||
+    (institution.trim() || null) !== (visit.attendee_institution ?? null) ||
+    (role.trim() || null) !== (visit.attendee_role ?? null);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!changed || saving) return;
     setSaving(true);
-    await editVisit(visit.id, { attendee_name: name, notes });
+    await editVisit(visit.id, { attendee_name: name, attendee_institution: institution, attendee_role: role, notes });
     setSaving(false);
     setMessage('Cambios guardados. El valor anterior queda en el historial de cambios.');
   }
@@ -56,6 +68,16 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
           <span>Nombre del asistente</span>
           <input type="text" value={name} maxLength={MAX_NAME_LENGTH} autoComplete="off" onChange={(e) => setName(e.target.value)} />
         </label>
+        <div className="field-pair">
+          <label className="field">
+            <span>Institución</span>
+            <input type="text" value={institution} maxLength={MAX_AFFILIATION_LENGTH} autoComplete="off" onChange={(e) => setInstitution(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Cargo</span>
+            <input type="text" value={role} maxLength={MAX_AFFILIATION_LENGTH} autoComplete="off" onChange={(e) => setRole(e.target.value)} />
+          </label>
+        </div>
         <label className="field">
           <span>Observaciones</span>
           <textarea value={notes} rows={2} maxLength={MAX_NOTES_LENGTH} onChange={(e) => setNotes(e.target.value)} />

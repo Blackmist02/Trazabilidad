@@ -62,6 +62,19 @@ describe('computeMetrics', () => {
     expect(m.timeline[0]).toMatchObject({ date: '2026-10-21', hour: 10, count: 3, cumulative: 3 });
   });
 
+  it('agrupa instituciones sin distinguir mayúsculas ni tildes', () => {
+    const mk = (code: string, inst: string | null) => ({ ...v(code, '2026-10-21T13:00:00Z', 'X'), attendee_institution: inst });
+    const r = computeMetrics(
+      [mk('A1', 'Codelco'), mk('A1', 'CODELCO'), mk('B2', 'Codelco'), mk('C3', 'Clínica Alemana'), mk('D4', 'clinica alemana'), mk('E5', null)],
+      TZ,
+    );
+    expect(r.byInstitution).toEqual([
+      { name: 'Codelco', visits: 3, codes: 2 },
+      { name: 'Clínica Alemana', visits: 2, codes: 2 },
+    ]);
+    expect(r.withInstitution).toBe(5);
+  });
+
   it('sin registros', () => {
     const empty = computeMetrics([], TZ);
     expect(empty.totalVisits).toBe(0);

@@ -6,6 +6,8 @@ export interface RemoteVisitRow {
   id: string;
   attendee_name: string | null;
   name_source?: string | null;
+  attendee_institution?: string | null;
+  attendee_role?: string | null;
   qr_payload: string | null;
   qr_identifier: string | null;
   qr_kind: string;
@@ -20,6 +22,8 @@ export interface RemoteVisitRow {
 export interface VisitChanges {
   attendee_name: string | null;
   name_source: string | null;
+  attendee_institution: string | null;
+  attendee_role: string | null;
   notes: string | null;
 }
 
@@ -48,6 +52,8 @@ export function toRemoteRow(v: Visit): RemoteVisitRow {
     id: v.id,
     attendee_name: v.attendee_name,
     name_source: v.name_source,
+    attendee_institution: v.attendee_institution ?? null,
+    attendee_role: v.attendee_role ?? null,
     qr_payload: v.qr_payload,
     qr_identifier: v.qr_identifier,
     qr_kind: v.qr_kind,
@@ -64,6 +70,8 @@ export function fromRemoteRow(row: RemoteVisitRow, local?: Visit): Visit {
     id: row.id,
     attendee_name: row.attendee_name,
     name_source: (row.name_source ?? (row.attendee_name ? 'manual' : null)) as Visit['name_source'],
+    attendee_institution: row.attendee_institution ?? null,
+    attendee_role: row.attendee_role ?? null,
     qr_payload: row.qr_payload,
     qr_identifier: row.qr_identifier,
     qr_kind: row.qr_kind as Visit['qr_kind'],
@@ -121,7 +129,7 @@ export function supabaseRemote(client: SupabaseClient): RemoteVisits {
     async fetchSince(standId, since, limit) {
       let q = client
         .from('visits')
-        .select('id,attendee_name,name_source,qr_payload,qr_identifier,qr_kind,visited_at,event_date,stand_id,notes,created_at,updated_at')
+        .select('id,attendee_name,name_source,attendee_institution,attendee_role,qr_payload,qr_identifier,qr_kind,visited_at,event_date,stand_id,notes,created_at,updated_at')
         .eq('stand_id', standId)
         .order('updated_at', { ascending: true })
         .limit(limit);

@@ -17,6 +17,7 @@ export function filterVisits(visits: Visit[], query: string, date: string, onlyP
     return (
       (v.attendee_name && normalizeName(v.attendee_name).includes(q)) ||
       (v.qr_identifier && v.qr_identifier.toLowerCase().includes(q)) ||
+      (v.attendee_institution && normalizeName(v.attendee_institution).includes(q)) ||
       (v.notes && normalizeName(v.notes).includes(q))
     );
   });
@@ -68,7 +69,7 @@ export function HistoryScreen() {
         <input
           type="search"
           className="grow"
-          placeholder="Buscar nombre o código"
+          placeholder="Buscar nombre, institución o código"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -113,6 +114,12 @@ export function HistoryScreen() {
                 </span>
                 <span className="visit-main">
                   <span className="visit-name">{v.attendee_name ?? 'Pendiente de nombre'}</span>
+                  {v.attendee_institution && (
+                    <span className="visit-org">
+                      {v.attendee_institution}
+                      {v.attendee_role ? ` · ${v.attendee_role}` : ''}
+                    </span>
+                  )}
                   <span className="visit-id mono">{v.qr_identifier ?? 'sin identificador'}</span>
                 </span>
                 <span className="visit-badges">

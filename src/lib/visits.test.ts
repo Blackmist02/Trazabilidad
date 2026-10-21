@@ -56,6 +56,29 @@ describe('createVisit', () => {
     expect(visit('ABC12345', '2026-10-21T15:00:00Z', 'Ana').name_source).toBe('manual');
   });
 
+  it('guarda institución y cargo, y audita su corrección', () => {
+    const v = createVisit({
+      parsed: parseQr('ABC12345'),
+      attendeeName: 'Juan Pérez Soto',
+      nameSource: 'ocr',
+      institution: '  CODELCO ',
+      role: 'Jefe de proyectos',
+      notes: null,
+      scannedAt: new Date('2026-10-21T15:00:00Z'),
+      standId: 'stand-1',
+      timeZone: TZ,
+      storePayload: true,
+      syncMode: false,
+    });
+    expect(v.attendee_institution).toBe('CODELCO');
+    expect(v.attendee_role).toBe('Jefe de proyectos');
+    const e = applyEdit(v, { attendee_institution: 'Codelco Chile', attendee_role: 'Jefe de proyectos' });
+    expect(e.attendee_institution).toBe('Codelco Chile');
+    expect(e.edits).toHaveLength(1);
+    expect(e.edits[0]).toMatchObject({ field: 'attendee_institution', old_value: 'CODELCO', new_value: 'Codelco Chile' });
+    expect(e.name_source).toBe('ocr'); // corregir la institución no cambia el origen del nombre
+  });
+
   it('permite registrar sin nombre como pendiente', () => {
     const v = visit('ABC12345', '2026-10-21T15:00:00Z', '   ');
     expect(v.attendee_name).toBeNull();

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { beep, vibrate } from '../lib/feedback';
-import { ocrSupported, prewarmOcr, recognizeLines } from '../lib/ocr';
-import { extractNameCandidates } from '../lib/ocrName';
+import { ocrSupported, prewarmOcr, readBadge } from '../lib/ocr';
 import { parseQr } from '../lib/qr';
 import { ScanGate } from '../lib/scanGate';
 import { formatLocalTime, localDateKey } from '../lib/time';
-import { createVisit, findPreviousVisits, knownNameFor, type NameSource } from '../lib/visits';
+import { createVisit, findPreviousVisits, knownAffiliationFor, knownNameFor } from '../lib/visits';
 import { useApp } from '../state/store';
-import { ConfirmVisit, type Candidate, type OcrState } from './ConfirmVisit';
+import { ConfirmVisit, OCR_IDLE, type Candidate, type ConfirmData, type OcrState } from './ConfirmVisit';
 import { QrCamera } from './QrCamera';
 
 interface Toast {
@@ -28,7 +27,7 @@ export function ScanScreen() {
   visitsRef.current = visits;
   const frameRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
   const ocrRunRef = useRef(0);
-  const [ocr, setOcr] = useState<OcrState>({ status: 'off', candidates: [] });
+  const [ocr, setOcr] = useState<OcrState>(OCR_IDLE);
   const ocrEnabled = settings.ocrEnabled && ocrSupported();
   const eventNameRef = useRef(settings.eventName);
   eventNameRef.current = settings.eventName;
@@ -37,18 +36,18 @@ export function ScanScreen() {
   const runOcr = useCallback((frame: HTMLCanvasElement | null) => {
     const run = ++ocrRunRef.current;
     if (!frame) {
-      setOcr({ status: 'no-camera', candidates: [] });
+      setOcr({ ...OCR_IDLE, status: 'no-camera' });
       return;
     }
-    setOcr({ status: 'running', candidates: [] });
-    recognizeLines(frame)
-      .then((lines) => {
+    setOcr({ ...OCR_IDLE, status: 'running' });
+    readBadge(frame, [eventNameRef.current])
+      .then((reading) => {
         if (run !== ocrRunRef.current) return;
-        const names = extractNameCandidates(lines, [eventNameRef.current]).map((c) => c.name);
-        setOcr({ status: names.length ? 'done' : 'empty', candidates: names });
+        const names = reading.names.map((c) => c.name);
+        setOcr({ status: names.length ? 'done' : 'empty', candidates: names, institution: reading.institution, role: reading.role });
       })
       .catch(() => {
-        if (run === ocrRunRef.current) setOcr({ status: 'error', candidates: [] });
+        if (run === ocrRunRef.current) setOcr({ ...OCR_IDLE, status: 'error' });
       });
   }, []);
 
@@ -71,11 +70,12 @@ export function ScanScreen() {
       const eventDate = localDateKey(scannedAt, settings.timeZone);
       const previous = findPreviousVisits(visitsRef.current, parsed?.identifier ?? null, eventDate);
       const knownName = knownNameFor(previous);
-      setCandidate({ parsed, manualIdentifier: null, scannedAt, previous, knownName, source });
+      const known = knownAffiliationFor(previous);
+      setCandidate({ parsed, manualIdentifier: null, scannedAt, previous, knownName, knownInstitution: known.institution, knownRole: known.role, source });
       ocrRunRef.current++;
       // Solo se lee la credencial si el QR no trae nombre ni hay uno confirmado antes para este código.
       if (ocrEnabled && frame && !parsed?.suggestedName && !knownName) runOcr(frame);
-      else setOcr({ status: 'off', candidates: [] });
+      else setOcr(OCR_IDLE);
     },
     [settings.timeZone, ocrEnabled, runOcr],
   );
@@ -111,13 +111,15 @@ export function ScanScreen() {
     setManualOpen(false);
   }
 
-  async function confirm({ name, nameSource, notes }: { name: string | null; nameSource: NameSource; notes: string | null }) {
+  async function confirm({ name, nameSource, institution, role, notes }: ConfirmData) {
     if (!candidate) return;
     const visit = createVisit({
       parsed: candidate.parsed,
       manualIdentifier: candidate.manualIdentifier,
       attendeeName: name,
       nameSource,
+      institution,
+      role,
       notes,
       scannedAt: candidate.scannedAt,
       standId: settings.standId,
@@ -200,6 +202,7 @@ export function ScanScreen() {
           timeZone={settings.timeZone}
           duplicatePolicy={settings.duplicatePolicy}
           privacyNotice={settings.privacyNotice}
+          captureAffiliation={settings.captureAffiliation}
           onConfirm={confirm}
           onCancel={cancel}
           ocr={ocrEnabled ? ocr : null}
