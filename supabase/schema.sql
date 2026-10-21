@@ -82,6 +82,12 @@ create policy "visits_update_operators" on public.visits
   using ((select public.is_operator(stand_id)))
   with check ((select public.is_operator(stand_id)));
 
+-- Origen del nombre (manual, qr, ocr, previous). Añadido después de la primera versión del esquema.
+alter table public.visits add column if not exists name_source text;
+alter table public.visits drop constraint if exists visits_name_source_check;
+alter table public.visits add constraint visits_name_source_check
+  check (name_source is null or name_source in ('manual', 'qr', 'ocr', 'previous'));
+
 -- Sin política DELETE: el borrado solo es posible desde el panel de administración.
 revoke all on public.visits from anon;
 grant select, insert, update on public.visits to authenticated;

@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { fetchAudit, type AuditEntry } from '../data/remote';
 import { MAX_NAME_LENGTH, QR_KIND_LABEL, type QrKind } from '../lib/qr';
 import { formatLocalDateTime } from '../lib/time';
-import { MAX_NOTES_LENGTH, type Visit } from '../lib/visits';
+import { MAX_NOTES_LENGTH, NAME_SOURCE_TEXT, type Visit } from '../lib/visits';
 import { useApp } from '../state/store';
 
 const FIELD_LABEL: Record<string, string> = { attendee_name: 'Nombre', notes: 'Observaciones' };
@@ -62,6 +62,12 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
         </label>
 
         <dl className="facts">
+          {visit.attendee_name && visit.name_source && (
+            <div>
+              <dt>Origen del nombre</dt>
+              <dd>{NAME_SOURCE_TEXT[visit.name_source]}</dd>
+            </div>
+          )}
           <div>
             <dt>Fecha y hora (Chile)</dt>
             <dd>{formatLocalDateTime(visit.visited_at, tz)}</dd>

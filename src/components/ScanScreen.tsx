@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { beep, vibrate } from '../lib/feedback';
+import { ocrSupported, prewarmOcr, recognizeLines } from '../lib/ocr';
+import { extractNameCandidates } from '../lib/ocrName';
 import { parseQr } from '../lib/qr';
 import { ScanGate } from '../lib/scanGate';
 import { formatLocalTime, localDateKey } from '../lib/time';
-import { createVisit, findPreviousVisits, knownNameFor } from '../lib/visits';
+import { createVisit, findPreviousVisits, knownNameFor, type NameSource } from '../lib/visits';
 import { useApp } from '../state/store';
-import { ConfirmVisit, type Candidate } from './ConfirmVisit';
+import { ConfirmVisit, type Candidate, type OcrState } from './ConfirmVisit';
 import { QrCamera } from './QrCamera';
 
 interface Toast {
@@ -24,6 +26,35 @@ export function ScanScreen() {
   const [toast, setToast] = useState<Toast | null>(null);
   const visitsRef = useRef(visits);
   visitsRef.current = visits;
+  const frameRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
+  const ocrRunRef = useRef(0);
+  const [ocr, setOcr] = useState<OcrState>({ status: 'off', candidates: [] });
+  const ocrEnabled = settings.ocrEnabled && ocrSupported();
+  const eventNameRef = useRef(settings.eventName);
+  eventNameRef.current = settings.eventName;
+
+  /** OCR del fotograma en segundo plano; descarta resultados de lecturas anteriores. */
+  const runOcr = useCallback((frame: HTMLCanvasElement | null) => {
+    const run = ++ocrRunRef.current;
+    if (!frame) {
+      setOcr({ status: 'no-camera', candidates: [] });
+      return;
+    }
+    setOcr({ status: 'running', candidates: [] });
+    recognizeLines(frame)
+      .then((lines) => {
+        if (run !== ocrRunRef.current) return;
+        const names = extractNameCandidates(lines, [eventNameRef.current]).map((c) => c.name);
+        setOcr({ status: names.length ? 'done' : 'empty', candidates: names });
+      })
+      .catch(() => {
+        if (run === ocrRunRef.current) setOcr({ status: 'error', candidates: [] });
+      });
+  }, []);
+
+  const prewarm = useCallback(() => {
+    if (ocrEnabled) prewarmOcr().catch(() => undefined);
+  }, [ocrEnabled]);
 
   useEffect(() => gate.setCooldown(settings.cooldownSeconds * 1000), [gate, settings.cooldownSeconds]);
 
@@ -34,26 +65,35 @@ export function ScanScreen() {
   }, [toast]);
 
   const openCandidate = useCallback(
-    (text: string | null, source: Candidate['source']) => {
+    (text: string | null, source: Candidate['source'], frame: HTMLCanvasElement | null = null) => {
       const scannedAt = new Date();
       const parsed = text ? parseQr(text) : null;
       const eventDate = localDateKey(scannedAt, settings.timeZone);
       const previous = findPreviousVisits(visitsRef.current, parsed?.identifier ?? null, eventDate);
-      setCandidate({ parsed, manualIdentifier: null, scannedAt, previous, knownName: knownNameFor(previous), source });
+      const knownName = knownNameFor(previous);
+      setCandidate({ parsed, manualIdentifier: null, scannedAt, previous, knownName, source });
+      ocrRunRef.current++;
+      // Solo se lee la credencial si el QR no trae nombre ni hay uno confirmado antes para este código.
+      if (ocrEnabled && frame && !parsed?.suggestedName && !knownName) runOcr(frame);
+      else setOcr({ status: 'off', candidates: [] });
     },
-    [settings.timeZone],
+    [settings.timeZone, ocrEnabled, runOcr],
   );
 
   const onDecode = useCallback(
     (text: string) => {
       if (!gate.accept(text)) return;
+      // Se copia el fotograma de inmediato: es el que muestra la credencial completa.
+      const frame = ocrEnabled ? (frameRef.current?.() ?? null) : null;
       if (settings.vibrate) vibrate(60);
       if (settings.sound) beep();
       setFlashKey((k) => k + 1);
-      openCandidate(text, 'camera');
+      openCandidate(text, 'camera', frame);
     },
-    [gate, openCandidate, settings.vibrate, settings.sound],
+    [gate, openCandidate, settings.vibrate, settings.sound, ocrEnabled],
   );
+
+  const retryOcr = useCallback(() => runOcr(frameRef.current?.() ?? null), [runOcr]);
 
   function submitManual(e: FormEvent) {
     e.preventDefault();
@@ -71,12 +111,13 @@ export function ScanScreen() {
     setManualOpen(false);
   }
 
-  async function confirm({ name, notes }: { name: string | null; notes: string | null }) {
+  async function confirm({ name, nameSource, notes }: { name: string | null; nameSource: NameSource; notes: string | null }) {
     if (!candidate) return;
     const visit = createVisit({
       parsed: candidate.parsed,
       manualIdentifier: candidate.manualIdentifier,
       attendeeName: name,
+      nameSource,
       notes,
       scannedAt: candidate.scannedAt,
       standId: settings.standId,
@@ -86,6 +127,7 @@ export function ScanScreen() {
     });
     await addVisit(visit);
     setCandidate(null);
+    ocrRunRef.current++;
     gate.release();
     if (settings.vibrate) vibrate([40, 40, 40]);
     setToast({
@@ -99,13 +141,14 @@ export function ScanScreen() {
 
   function cancel() {
     setCandidate(null);
+    ocrRunRef.current++;
     gate.release();
   }
 
   return (
     <section className="screen scan-screen" aria-labelledby="scan-title">
       <h1 id="scan-title" className="sr-only">Escanear</h1>
-      <QrCamera onDecode={onDecode} paused={!!candidate} flashKey={flashKey} />
+      <QrCamera onDecode={onDecode} paused={!!candidate} flashKey={flashKey} frameRef={frameRef} onStarted={prewarm} />
 
       {toast && (
         <div key={toast.id} className={`toast toast-${toast.kind}`} role="status">
@@ -159,6 +202,8 @@ export function ScanScreen() {
           privacyNotice={settings.privacyNotice}
           onConfirm={confirm}
           onCancel={cancel}
+          ocr={ocrEnabled ? ocr : null}
+          onRetryOcr={retryOcr}
         />
       )}
     </section>

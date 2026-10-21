@@ -47,7 +47,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       const batch = pending.slice(i, i + BATCH);
       await remote.insert(batch.map(toRemoteRow));
       for (const v of batch) {
-        if (v.dirty) await remote.update(v.id, { attendee_name: v.attendee_name, notes: v.notes });
+        if (v.dirty) await remote.update(v.id, { attendee_name: v.attendee_name, name_source: v.name_source, notes: v.notes });
         await markSynced(store, v);
         pushed++;
       }

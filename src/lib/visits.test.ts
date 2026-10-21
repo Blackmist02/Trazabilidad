@@ -38,6 +38,24 @@ describe('createVisit', () => {
     expect(v.qr_identifier).toBe('https://ex.com/b/1');
   });
 
+  it('guarda el origen del nombre (OCR) y lo pasa a manual al corregirlo', () => {
+    const v = createVisit({
+      parsed: parseQr('BDFFE48F81E448617430250Enp'),
+      attendeeName: 'María José González',
+      nameSource: 'ocr',
+      notes: null,
+      scannedAt: new Date('2026-10-21T15:00:00Z'),
+      standId: 'stand-1',
+      timeZone: TZ,
+      storePayload: true,
+      syncMode: false,
+    });
+    expect(v.name_source).toBe('ocr');
+    expect(applyEdit(v, { attendee_name: 'María José González Soto' }).name_source).toBe('manual');
+    expect(visit('ABC12345', '2026-10-21T15:00:00Z', null).name_source).toBeNull();
+    expect(visit('ABC12345', '2026-10-21T15:00:00Z', 'Ana').name_source).toBe('manual');
+  });
+
   it('permite registrar sin nombre como pendiente', () => {
     const v = visit('ABC12345', '2026-10-21T15:00:00Z', '   ');
     expect(v.attendee_name).toBeNull();

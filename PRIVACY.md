@@ -11,6 +11,10 @@
 | Stand | Separar los registros de cada stand. |
 | Observaciones | Opcional; no anotes datos sensibles (salud, religión, etc.). |
 
+| Origen del nombre | Trazabilidad: si lo escribió el operador, venía en el QR, se leyó de la credencial (OCR) o se tomó de una visita anterior. |
+
+**Lectura de la credencial (OCR):** se analiza en el propio teléfono el fotograma en que se detectó el QR para proponer el nombre impreso. La imagen se descarta en el momento: no se guarda, no se exporta y no se envía a ningún servicio. Solo se conserva el nombre que el operador confirma.
+
 **No se recogen**: ubicación GPS, huella del dispositivo, fotos, datos de contacto ni información de terceros. Los códigos QR **no** se envían a ningún servicio para descifrarlos y las URL de los QR **no** se abren. La app no escribe nombres ni identificadores en los registros técnicos (consola).
 
 Poder leer un QR **no autoriza** a usar los datos personales que contenga. El operador debe informar al asistente (la app muestra el aviso configurable en cada confirmación) y respetar su negativa.

@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { MAX_NAME_LENGTH, NAME_SOURCE_LABEL, QR_KIND_LABEL, type ParsedQr } from '../lib/qr';
 import { formatLocalDate, formatLocalTime, formatLocalTimeShort } from '../lib/time';
-import { MAX_NOTES_LENGTH, type PreviousVisits } from '../lib/visits';
+import { MAX_NOTES_LENGTH, type NameSource, type PreviousVisits } from '../lib/visits';
 import type { DuplicatePolicy } from '../lib/settings';
+
+export type OcrStatus = 'off' | 'running' | 'done' | 'empty' | 'error' | 'no-camera';
+
+export interface OcrState {
+  status: OcrStatus;
+  candidates: string[];
+}
 
 export interface Candidate {
   parsed: ParsedQr | null;
@@ -18,14 +25,32 @@ interface Props {
   timeZone: string;
   duplicatePolicy: DuplicatePolicy;
   privacyNotice: string;
-  onConfirm: (data: { name: string | null; notes: string | null }) => Promise<void>;
+  onConfirm: (data: { name: string | null; nameSource: NameSource; notes: string | null }) => Promise<void>;
   onCancel: () => void;
+  /** Lectura del nombre impreso en la credencial; null si el OCR está desactivado. */
+  ocr: OcrState | null;
+  onRetryOcr: () => void;
 }
 
-export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNotice, onConfirm, onCancel }: Props) {
+export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNotice, onConfirm, onCancel, ocr, onRetryOcr }: Props) {
   const { parsed, previous } = candidate;
   const initialName = parsed?.suggestedName ?? candidate.knownName ?? '';
   const [name, setName] = useState(initialName);
+  const [nameOrigin, setNameOrigin] = useState<NameSource>(
+    parsed?.suggestedName ? 'qr' : candidate.knownName ? 'previous' : 'manual',
+  );
+  const touchedRef = useRef(false);
+  const ocrStatus = ocr?.status ?? 'off';
+  const ocrCandidates = ocr?.candidates ?? [];
+
+  // Autocompleta con la mejor lectura del OCR si el operador aún no escribió nada.
+  useEffect(() => {
+    if (ocrStatus !== 'done' || !ocrCandidates.length) return;
+    if (touchedRef.current || name.trim()) return;
+    setName(ocrCandidates[0]);
+    setNameOrigin('ocr');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrStatus, ocrCandidates]);
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -33,9 +58,11 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
   const nameRef = useRef<HTMLInputElement>(null);
   const submittingRef = useRef(false);
 
+  // Sin OCR en curso se enfoca el nombre para escribirlo; con OCR se espera para no tapar la pantalla con el teclado.
   useEffect(() => {
-    if (!initialName) nameRef.current?.focus();
-  }, [initialName]);
+    if (!initialName && ocrStatus === 'off') nameRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const identifier = parsed?.identifier ?? candidate.manualIdentifier;
   const repeatedToday = previous.sameDay.length > 0;
@@ -49,7 +76,7 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
     setSaving(true);
     setError(null);
     try {
-      await onConfirm({ name: trimmed || null, notes: notes.trim() || null });
+      await onConfirm({ name: trimmed || null, nameSource: nameOrigin, notes: notes.trim() || null });
     } catch {
       setError('No se pudo guardar el registro. Inténtalo de nuevo.');
       submittingRef.current = false;
@@ -57,11 +84,22 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
     }
   }
 
-  const nameHint = parsed?.suggestedName && parsed.nameSource
-    ? `Nombre leído del ${NAME_SOURCE_LABEL[parsed.nameSource]}. Verifícalo.`
-    : candidate.knownName
-      ? 'Nombre tomado de una visita anterior con el mismo código. Verifícalo.'
-      : 'El código no contiene un nombre. Pregúntalo al visitante.';
+  const nameHint =
+    nameOrigin === 'ocr' && trimmed
+      ? 'Leído del texto impreso en la credencial. Verifica que esté bien escrito.'
+      : nameOrigin === 'qr' && parsed?.nameSource
+        ? `Nombre leído del ${NAME_SOURCE_LABEL[parsed.nameSource]}. Verifícalo.`
+        : nameOrigin === 'previous' && trimmed
+          ? 'Nombre tomado de una visita anterior con el mismo código. Verifícalo.'
+          : ocrStatus === 'running'
+            ? 'Leyendo el nombre impreso en la credencial…'
+            : 'El código no contiene un nombre. Escríbelo o léelo de la credencial.';
+
+  function pickName(value: string) {
+    touchedRef.current = true;
+    setName(value);
+    setNameOrigin('ocr');
+  }
 
   return (
     <div className="sheet-backdrop" role="presentation">
@@ -110,10 +148,41 @@ export function ConfirmVisit({ candidate, timeZone, duplicatePolicy, privacyNoti
             autoCapitalize="words"
             enterKeyHint="done"
             placeholder="Nombre y apellido"
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              touchedRef.current = true;
+              setName(e.target.value);
+              setNameOrigin('manual');
+            }}
           />
-          <small id="attendee-name-hint" className="muted">{nameHint}</small>
+          <small id="attendee-name-hint" className="muted" aria-live="polite">{nameHint}</small>
         </div>
+
+        {ocr && (
+          <div className="ocr-box">
+            {ocrStatus === 'running' && (
+              <span className="ocr-status">
+                <span className="spinner" aria-hidden="true" /> Leyendo la credencial…
+              </span>
+            )}
+            {ocrStatus === 'done' && ocrCandidates.length > 0 && (
+              <div className="chips" role="group" aria-label="Nombres leídos en la credencial">
+                {ocrCandidates.map((c) => (
+                  <button key={c} type="button" className={`chip ${c === trimmed ? 'is-on' : ''}`} onClick={() => pickName(c)}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+            {ocrStatus === 'empty' && <span className="ocr-status">No se encontró un nombre legible. Acerca la credencial y vuelve a leer.</span>}
+            {ocrStatus === 'error' && <span className="ocr-status">No se pudo usar el lector de texto en este dispositivo.</span>}
+            {ocrStatus === 'no-camera' && <span className="ocr-status">Inicia la cámara para leer el nombre de la credencial.</span>}
+            {ocrStatus !== 'running' && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onRetryOcr}>
+                {ocrStatus === 'off' ? 'Leer nombre de la credencial' : 'Volver a leer'}
+              </button>
+            )}
+          </div>
+        )}
 
         <dl className="facts">
           <div>

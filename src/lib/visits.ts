@@ -12,6 +12,16 @@ export const MAX_NOTES_LENGTH = 500;
  */
 export type SyncState = 'local' | 'pending' | 'synced';
 
+/** Origen del nombre: escrito por el operador, leído del QR, leído por OCR de la credencial o tomado de una visita anterior. */
+export type NameSource = 'manual' | 'qr' | 'ocr' | 'previous';
+
+export const NAME_SOURCE_TEXT: Record<NameSource, string> = {
+  manual: 'Escrito por el operador',
+  qr: 'Contenido del QR',
+  ocr: 'Texto impreso en la credencial (OCR)',
+  previous: 'Visita anterior del mismo código',
+};
+
 export interface VisitEdit {
   at: string;
   field: 'attendee_name' | 'notes';
@@ -22,6 +32,8 @@ export interface VisitEdit {
 export interface Visit {
   id: string;
   attendee_name: string | null;
+  /** null cuando no hay nombre. */
+  name_source: NameSource | null;
   qr_payload: string | null;
   qr_identifier: string | null;
   qr_kind: QrKind | 'manual';
@@ -56,6 +68,8 @@ export interface NewVisitInput {
   /** Identificador introducido a mano cuando no hay QR legible. */
   manualIdentifier?: string | null;
   attendeeName: string | null;
+  /** Por defecto 'manual'. */
+  nameSource?: NameSource;
   notes: string | null;
   /** Momento de la lectura: lo fija la app, nunca el operador. */
   scannedAt: Date;
@@ -83,9 +97,11 @@ export function createVisit(input: NewVisitInput): Visit {
     const id = sanitizeText(input.manualIdentifier).trim();
     identifier = id ? id.slice(0, MAX_IDENTIFIER_LENGTH) : null;
   }
+  const name = cleanName(input.attendeeName);
   return {
     id: uuid(),
-    attendee_name: cleanName(input.attendeeName),
+    attendee_name: name,
+    name_source: name ? (input.nameSource ?? 'manual') : null,
     qr_payload: payload,
     qr_identifier: identifier,
     qr_kind: kind,
@@ -117,6 +133,7 @@ export function applyEdit(
     if (name !== visit.attendee_name) {
       edits.push({ at: at.toISOString(), field: 'attendee_name', old_value: visit.attendee_name, new_value: name });
       next.attendee_name = name;
+      next.name_source = name ? 'manual' : null;
     }
   }
   if (changes.notes !== undefined) {

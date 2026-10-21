@@ -17,6 +17,8 @@ export interface Settings {
   cooldownSeconds: number;
   /** Conservar el contenido original del QR cuando no coincide con el identificador (p. ej. URLs). */
   storePayload: boolean;
+  /** Leer el nombre impreso en la credencial con OCR en el dispositivo. */
+  ocrEnabled: boolean;
   vibrate: boolean;
   sound: boolean;
   privacyNotice: string;
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   duplicatePolicy: 'ask',
   cooldownSeconds: 5,
   storePayload: true,
+  ocrEnabled: true,
   vibrate: true,
   sound: false,
   privacyNotice: 'Registramos tu nombre y la hora de tu visita a nuestro stand para medir la afluencia. No compartimos estos datos con terceros.',

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseQr } from '../lib/qr';
 import { applyEdit, createVisit, type Visit } from '../lib/visits';
 import { VisitStore } from './db';
-import { classifyRemoteError, RemoteError, type RemoteVisitRow, type RemoteVisits } from './remote';
+import { classifyRemoteError, RemoteError, type RemoteVisitRow, type RemoteVisits, type VisitChanges } from './remote';
 import { syncOnce } from './sync';
 
 let dbCounter = 0;
@@ -37,7 +37,7 @@ class FakeRemote implements RemoteVisits {
     this.inserts++;
     for (const r of rows) if (!this.rows.has(r.id)) this.rows.set(r.id, { ...r, updated_at: this.stamp() });
   }
-  async update(id: string, changes: { attendee_name: string | null; notes: string | null }) {
+  async update(id: string, changes: VisitChanges) {
     if (this.failWith) throw this.failWith;
     const row = this.rows.get(id);
     if (row) this.rows.set(id, { ...row, ...changes, updated_at: this.stamp() });

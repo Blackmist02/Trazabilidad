@@ -1,5 +1,5 @@
 import { formatLocalDate, formatLocalTime } from './time';
-import type { Visit } from './visits';
+import { NAME_SOURCE_TEXT, type Visit } from './visits';
 
 export type CsvSeparator = ',' | ';';
 
@@ -28,6 +28,7 @@ export const CSV_HEADERS = [
   'Timestamp UTC',
   'Stand',
   'Observaciones',
+  'Origen del nombre',
   'ID registro',
 ] as const;
 
@@ -46,6 +47,7 @@ export function visitsToCsv(visits: Visit[], timeZone: string, separator: CsvSep
         v.visited_at,
         v.stand_id,
         v.notes,
+        v.name_source ? NAME_SOURCE_TEXT[v.name_source] : null,
         v.id,
       ]
         .map(csvCell)
@@ -53,7 +55,7 @@ export function visitsToCsv(visits: Visit[], timeZone: string, separator: CsvSep
     );
   const header = CSV_HEADERS.map(csvCell).join(separator);
   // BOM para que Excel detecte UTF-8; fin de línea CRLF según RFC 4180.
-  return '﻿' + [header, ...rows].join('\r\n') + '\r\n';
+  return String.fromCharCode(0xfeff) + [header, ...rows].join('\r\n') + '\r\n';
 }
 
 export function csvFileName(standId: string, suffix: string): string {

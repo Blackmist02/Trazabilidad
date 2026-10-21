@@ -1,6 +1,7 @@
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkCameraSupport, mapCameraError, type CameraError } from '../lib/camera';
+import { captureVideoFrame } from '../lib/ocr';
 
 export type CameraState = 'idle' | 'starting' | 'scanning' | 'paused' | 'error';
 
@@ -10,11 +11,15 @@ interface Props {
   paused: boolean;
   /** Se incrementa cuando hay una lectura aceptada, para el destello visual. */
   flashKey: number;
+  /** Recibe una función que copia el fotograma actual (null si la cámara no está activa). */
+  frameRef?: { current: (() => HTMLCanvasElement | null) | null };
+  /** Se invoca cuando la cámara empieza a mostrar imagen. */
+  onStarted?: () => void;
 }
 
 const DEVICE_KEY = 'trazabilidad.cameraDevice';
 
-export function QrCamera({ onDecode, paused, flashKey }: Props) {
+export function QrCamera({ onDecode, paused, flashKey, frameRef, onStarted }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const onDecodeRef = useRef(onDecode);
@@ -32,6 +37,18 @@ export function QrCamera({ onDecode, paused, flashKey }: Props) {
 
   onDecodeRef.current = onDecode;
   pausedRef.current = paused;
+
+  useEffect(() => {
+    if (!frameRef) return;
+    // Se comprueba el vídeo y no los controles: la primera lectura puede llegar antes de que zxing los devuelva.
+    frameRef.current = () => {
+      const video = videoRef.current;
+      return video && video.srcObject && video.readyState >= 2 ? captureVideoFrame(video) : null;
+    };
+    return () => {
+      frameRef.current = null;
+    };
+  }, [frameRef]);
 
   const stop = useCallback(() => {
     controlsRef.current?.stop();
@@ -68,6 +85,7 @@ export function QrCamera({ onDecode, paused, flashKey }: Props) {
         });
         controlsRef.current = controls;
         setState('scanning');
+        onStarted?.();
         // Con el permiso concedido ya se pueden listar las cámaras con su nombre.
         BrowserQRCodeReader.listVideoInputDevices()
           .then(setDevices)
@@ -84,7 +102,7 @@ export function QrCamera({ onDecode, paused, flashKey }: Props) {
         setState('error');
       }
     },
-    [deviceId],
+    [deviceId, onStarted],
   );
 
   useEffect(() => () => controlsRef.current?.stop(), []);

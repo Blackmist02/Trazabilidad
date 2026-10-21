@@ -207,6 +207,17 @@ textarea { min-height: 64px; resize: vertical; }
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0.6; } }
 .sheet-handle { width: 40px; height: 4px; border-radius: 4px; background: var(--border); margin: 4px auto; }
 .sheet-actions { display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--surface); padding-top: 4px; }
+.ocr-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -4px; }
+.ocr-status { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-2); flex: 1 1 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+.chip {
+  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); font-weight: 600; cursor: pointer;
+}
+.chip.is-on { background: var(--primary-soft); border-color: var(--primary); color: var(--text); }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--primary); animation: spin 0.8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 .privacy-reminder { margin: 0; font-size: 0.8rem; color: var(--muted); }
 .facts { margin: 0; display: grid; gap: 8px; background: var(--surface-2); padding: 10px 12px; border-radius: 10px; }
 .facts div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }

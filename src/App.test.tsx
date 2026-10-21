@@ -34,7 +34,7 @@ describe('flujo de registro', () => {
     const store = renderApp();
     expect(screen.getByText('Local · solo este dispositivo')).toBeTruthy();
     await enterManually('BDFFE48F81E448617430250Enp');
-    expect(screen.getByText('El código no contiene un nombre. Pregúntalo al visitante.')).toBeTruthy();
+    expect(screen.getByText('El código no contiene un nombre. Escríbelo o léelo de la credencial.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Nombre del asistente'), { target: { value: 'Ana Pérez' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Registrar visita' }));
