@@ -106,6 +106,8 @@ function cropBelowQr(frame: HTMLCanvasElement, qr: QrLocation): HTMLCanvasElemen
  * 2. Relectura del bloque recortado y ampliado, línea a línea, para mayor precisión.
  */
 export interface BadgeResult extends BadgeReading {
+  /** Zona de la credencial que se leyó (la que se guarda como imagen de la visita). */
+  zone: HTMLCanvasElement;
   /**
    * Miniatura de la zona leída, para que el operador vea qué leyó el OCR.
    * Solo se muestra en la confirmación: no se guarda ni se envía.
@@ -128,15 +130,58 @@ export function readBadge({ canvas: frame, qr }: CapturedFrame, extraStopwords: 
     if (below) {
       // El nombre debe empezar a menos de un lado de QR del borde superior de la franja.
       const reading = readBelowQr(await recognize(worker, below, '6'), extraStopwords, QR_CROP_PIXELS);
-      if (reading.names.length) return { ...reading, preview: preview(below) };
+      if (reading.names.length) return { ...reading, zone: below, preview: preview(below) };
     }
     const first = analyzeBadge(await recognize(worker, frame, '11'), extraStopwords);
     const crop = first.block ? cropBlock(frame, first.block, first.nameHeight) : null;
-    if (!crop) return { ...first, preview: preview(below ?? frame) };
-    return { ...mergeBlockReading(first, await recognize(worker, crop, '6'), extraStopwords), preview: preview(crop) };
+    if (!crop) {
+      const zone = below ?? frame;
+      return { ...first, zone, preview: preview(zone) };
+    }
+    return { ...mergeBlockReading(first, await recognize(worker, crop, '6'), extraStopwords), zone: crop, preview: preview(crop) };
   });
   queue = job.catch(() => undefined);
   return job;
+}
+
+/**
+ * Zona de la credencial que se guarda con la visita cuando no hay lectura OCR:
+ * la franja bajo el QR (nombre, institución y cargo) o, si no se sabe dónde está el QR, el fotograma.
+ */
+export function badgeZone({ canvas, qr }: CapturedFrame): HTMLCanvasElement {
+  return (qr && cropBelowQr(canvas, qr)) || canvas;
+}
+
+/** Ancho máximo de la imagen guardada: suficiente para leer el texto y ligera (~15–40 KB en WebP). */
+const IMAGE_MAX_WIDTH = 900;
+
+function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+/**
+ * Codifica la zona en WebP. Safari en iOS no genera WebP desde un canvas (entrega PNG):
+ * en ese caso se usa JPEG, que pesa algo más pero sigue siendo pequeño.
+ */
+export async function encodeBadgeImage(zone: HTMLCanvasElement): Promise<{ data: ArrayBuffer; type: string } | null> {
+  try {
+    let canvas = zone;
+    if (zone.width > IMAGE_MAX_WIDTH) {
+      canvas = document.createElement('canvas');
+      canvas.width = IMAGE_MAX_WIDTH;
+      canvas.height = Math.round((zone.height * IMAGE_MAX_WIDTH) / zone.width);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(zone, 0, 0, canvas.width, canvas.height);
+    }
+    let blob = await toBlob(canvas, 'image/webp', 0.6);
+    if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg', 0.7);
+    if (!blob) return null;
+    return { data: await blob.arrayBuffer(), type: blob.type };
+  } catch {
+    return null;
+  }
 }
 
 /**

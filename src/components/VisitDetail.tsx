@@ -14,7 +14,9 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => void }) {
-  const { settings, editVisit, supabase, session } = useApp();
+  const { settings, editVisit, supabase, session, getVisitImage } = useApp();
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageState, setImageState] = useState<'none' | 'loading' | 'ready' | 'unavailable'>(visit.image_path ? 'loading' : 'none');
   const [name, setName] = useState(visit.attendee_name ?? '');
   const [notes, setNotes] = useState(visit.notes ?? '');
   const [institution, setInstitution] = useState(visit.attendee_institution ?? '');
@@ -34,6 +36,25 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
       active = false;
     };
   }, [supabase, session, visit.id, visit.sync_state, visit.updated_at]);
+
+  useEffect(() => {
+    if (!visit.image_path) return;
+    let active = true;
+    let url: string | null = null;
+    getVisitImage(visit)
+      .then((blob) => {
+        if (!active) return;
+        if (!blob) return setImageState('unavailable');
+        url = URL.createObjectURL(blob);
+        setImageUrl(url);
+        setImageState('ready');
+      })
+      .catch(() => active && setImageState('unavailable'));
+    return () => {
+      active = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [visit.id, visit.image_path, getVisitImage]);
 
   const changed =
     (name.trim() || null) !== visit.attendee_name ||
@@ -63,6 +84,17 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
           </button>
         </div>
         {!visit.attendee_name && <div className="notice notice-warning">Pendiente de completar el nombre.</div>}
+
+        {imageState !== 'none' && (
+          <figure className="badge-image">
+            {imageState === 'ready' && imageUrl && <img src={imageUrl} alt="Texto de la credencial escaneada" />}
+            {imageState === 'loading' && <span className="muted">Cargando imagen de la credencial…</span>}
+            {imageState === 'unavailable' && (
+              <span className="muted">La imagen de la credencial no está en este dispositivo (inicia sesión con conexión para verla).</span>
+            )}
+            <figcaption>Credencial escaneada: compárala con los datos y corrige si hace falta.</figcaption>
+          </figure>
+        )}
 
         <label className="field">
           <span>Nombre del asistente</span>

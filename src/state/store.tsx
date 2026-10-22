@@ -1,7 +1,7 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { VisitStore } from '../data/db';
-import { supabaseRemote } from '../data/remote';
+import { downloadImage, supabaseRemote } from '../data/remote';
 import { getSupabase } from '../data/supabaseClient';
 import { resetPullCursor, retryDelayMs, syncOnce, type SyncPhase } from '../data/sync';
 import { loadSettings, normalizeSettings, saveSettings, syncConfigured, type Settings } from '../lib/settings';
@@ -20,7 +20,10 @@ interface AppContextValue {
   visits: Visit[];
   loading: boolean;
   storageError: string | null;
-  addVisit: (visit: Visit) => Promise<void>;
+  /** Guarda la visita y, si la hay, la imagen de la credencial. */
+  addVisit: (visit: Visit, image?: { data: ArrayBuffer; type: string } | null) => Promise<void>;
+  /** Imagen de la credencial de una visita como blob (local o descargada de Supabase), o null. */
+  getVisitImage: (visit: Visit) => Promise<Blob | null>;
   editVisit: (id: string, changes: VisitChangesInput) => Promise<Visit | null>;
   clearLocal: (options: { keepPending: boolean }) => Promise<number>;
   queueLocalForUpload: () => Promise<number>;
@@ -156,14 +159,28 @@ export function AppProvider({ children, store: injectedStore }: { children: Reac
   }, []);
 
   const addVisit = useCallback(
-    async (visit: Visit) => {
-      await store.put(visit);
+    async (visit: Visit, image?: { data: ArrayBuffer; type: string } | null) => {
+      if (image) await store.putWithImage(visit, image);
+      else await store.put(visit);
       // Pide al navegador que no borre el almacenamiento por falta de espacio.
       void navigator.storage?.persist?.().catch(() => undefined);
       await refresh();
       if (syncEnabled) void syncNow();
     },
     [store, refresh, syncEnabled, syncNow],
+  );
+
+  const getVisitImage = useCallback(
+    async (visit: Visit) => {
+      const local = await store.getImage(visit.id);
+      if (local) return new Blob([local.data], { type: local.type });
+      if (!visit.image_path || !supabase || !session) return null;
+      const remote = await downloadImage(supabase, visit.image_path);
+      // Se guarda en el dispositivo para verla sin conexión; se borra con la copia local.
+      await store.putImage({ id: visit.id, data: remote.data, type: remote.type, uploaded: true });
+      return new Blob([remote.data], { type: remote.type });
+    },
+    [store, supabase, session],
   );
 
   const editVisit = useCallback(
@@ -240,6 +257,7 @@ export function AppProvider({ children, store: injectedStore }: { children: Reac
     loading,
     storageError,
     addVisit,
+    getVisitImage,
     editVisit,
     clearLocal,
     queueLocalForUpload,

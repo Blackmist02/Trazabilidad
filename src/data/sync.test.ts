@@ -8,8 +8,9 @@ import { syncOnce } from './sync';
 let dbCounter = 0;
 const newStore = () => new VisitStore(`test-${++dbCounter}`);
 
-function visit(code: string, name: string | null, syncMode = true): Visit {
+function visit(code: string, name: string | null, syncMode = true, imageType: string | null = null): Visit {
   return createVisit({
+    imageType,
     parsed: parseQr(code),
     attendeeName: name,
     notes: null,
@@ -27,6 +28,9 @@ class FakeRemote implements RemoteVisits {
   inserts = 0;
   updates: { id: string; attendee_name: string | null }[] = [];
   failWith: unknown = null;
+  /** Fallo solo de Storage (p. ej. el bucket no existe). */
+  imageFailWith: unknown = null;
+  images = new Map<string, { path: string; bytes: number; type: string }>();
   private clock = 0;
 
   private stamp(): string {
@@ -42,6 +46,13 @@ class FakeRemote implements RemoteVisits {
     const row = this.rows.get(id);
     if (row) this.rows.set(id, { ...row, ...changes, updated_at: this.stamp() });
     this.updates.push({ id, attendee_name: changes.attendee_name });
+  }
+  async uploadImage(visitId: string, path: string, data: ArrayBuffer, type: string) {
+    if (this.failWith) throw this.failWith;
+    if (this.imageFailWith) throw this.imageFailWith;
+    this.images.set(path, { path, bytes: data.byteLength, type });
+    const row = this.rows.get(visitId);
+    if (row) this.rows.set(visitId, { ...row, image_path: path, updated_at: this.stamp() });
   }
   async fetchSince(standId: string, since: string | null, limit: number) {
     if (this.failWith) throw this.failWith;
@@ -159,6 +170,58 @@ describe('syncOnce', () => {
   });
 });
 
+describe('imágenes de la credencial', () => {
+  const bytes = (n: number) => new Uint8Array(n).fill(7).buffer;
+
+  it('guarda la imagen en el dispositivo y la sube tras enviar el registro', async () => {
+    const store = newStore();
+    const remote = new FakeRemote();
+    const v = visit('AAA111', 'Ana', true, 'image/webp');
+    expect(v.image_path).toBe(`${v.id}.webp`);
+    await store.putWithImage(v, { data: bytes(1200), type: 'image/webp' });
+    const r = await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
+    expect(r).toMatchObject({ phase: 'idle', pushed: 1, imagesPushed: 1, imagesPending: 0 });
+    expect(remote.images.get(`${v.id}.webp`)).toEqual({ path: `${v.id}.webp`, bytes: 1200, type: 'image/webp' });
+    expect(remote.rows.get(v.id)?.image_path).toBe(`${v.id}.webp`);
+    expect((await store.getImage(v.id))?.uploaded).toBe(true);
+    expect((await store.get(v.id))?.image_path).toBe(`${v.id}.webp`);
+  });
+
+  it('si Storage falla, el registro se sincroniza igual y la imagen se reintenta', async () => {
+    const store = newStore();
+    const remote = new FakeRemote();
+    remote.imageFailWith = { message: 'Bucket not found', statusCode: '404' };
+    const v = visit('AAA111', 'Ana', true, 'image/jpeg');
+    await store.putWithImage(v, { data: bytes(10), type: 'image/jpeg' });
+    const r = await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
+    expect(r).toMatchObject({ phase: 'idle', pushed: 1, imagesPushed: 0, imagesPending: 1 });
+    expect(remote.rows.get(v.id)?.image_path).toBeUndefined();
+    // La descarga del propio registro no borra la ruta local pendiente.
+    expect((await store.get(v.id))?.image_path).toBe(`${v.id}.jpg`);
+
+    remote.imageFailWith = null;
+    const r2 = await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
+    expect(r2).toMatchObject({ imagesPushed: 1, imagesPending: 0 });
+  });
+
+  it('en modo local la imagen no se sube', async () => {
+    const store = newStore();
+    const remote = new FakeRemote();
+    const v = visit('AAA111', 'Ana', false, 'image/webp');
+    await store.putWithImage(v, { data: bytes(10), type: 'image/webp' });
+    await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
+    expect(remote.images.size).toBe(0);
+  });
+
+  it('borrar la copia local elimina también las imágenes', async () => {
+    const store = newStore();
+    const v = visit('AAA111', 'Ana', false, 'image/webp');
+    await store.putWithImage(v, { data: bytes(10), type: 'image/webp' });
+    expect(await store.clear()).toBe(1);
+    expect(await store.getImage(v.id)).toBeUndefined();
+  });
+});
+
 describe('classifyRemoteError', () => {
   it('clasifica errores comunes', () => {
     expect(classifyRemoteError(new TypeError('Failed to fetch')).kind).toBe('network');
@@ -168,5 +231,29 @@ describe('classifyRemoteError', () => {
     expect(classifyRemoteError({ code: 'XX000' }, 500).kind).toBe('server');
     const e = new RemoteError('network', 'x');
     expect(classifyRemoteError(e)).toBe(e);
+  });
+});
+
+describe('VisitStore: actualización de la base local', () => {
+  it('al pasar de la versión 1 a la 2 conserva las visitas y añade las imágenes', async () => {
+    const { openDB } = await import('idb');
+    const name = `test-migracion-${++dbCounter}`;
+    const v1 = await openDB(name, 1, {
+      upgrade(db) {
+        const visits = db.createObjectStore('visits', { keyPath: 'id' });
+        visits.createIndex('by_visited_at', 'visited_at');
+        visits.createIndex('by_sync_state', 'sync_state');
+        db.createObjectStore('meta');
+      },
+    });
+    const old = visit('AAA111', 'Ana', false);
+    delete old.image_path; // los registros antiguos no tienen el campo
+    await v1.put('visits', old);
+    v1.close();
+
+    const store = new VisitStore(name);
+    expect((await store.all()).map((x) => x.attendee_name)).toEqual(['Ana']);
+    expect(await store.getImage(old.id)).toBeUndefined();
+    expect(await store.imagesToUpload()).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 import type { Visit } from '../lib/visits';
 import type { VisitStore } from './db';
-import { classifyRemoteError, fromRemoteRow, RemoteError, type RemoteVisits, toRemoteRow } from './remote';
+import { classifyRemoteError, fromRemoteRow, isNetworkFailure, RemoteError, type RemoteVisits, toRemoteRow } from './remote';
 
 export type SyncPhase = 'idle' | 'syncing' | 'offline' | 'error' | 'unauthorized';
 
@@ -9,6 +9,9 @@ export interface SyncResult {
   pushed: number;
   pulled: number;
   pending: number;
+  /** Imágenes subidas en esta pasada y las que siguen pendientes. */
+  imagesPushed: number;
+  imagesPending: number;
   error: string | null;
   at: string;
 }
@@ -28,7 +31,9 @@ export interface SyncDeps {
  * Sincronización con Supabase:
  * 1. Envía registros pendientes (inserción idempotente por id: reintentar no duplica).
  * 2. Envía correcciones (nombre/notas); el servidor guarda la auditoría con un trigger.
- * 3. Descarga cambios del mismo stand desde la última sincronización.
+ * 3. Sube las imágenes de las credenciales de visitas ya enviadas. Un fallo aquí no frena el resto:
+ *    la imagen queda en el dispositivo y se reintenta en la siguiente pasada.
+ * 4. Descarga cambios del mismo stand desde la última sincronización.
  * Los registros pendientes nunca se descartan: si algo falla quedan para el siguiente intento.
  */
 export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
@@ -36,9 +41,11 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
   const at = new Date().toISOString();
   let pushed = 0;
   let pulled = 0;
+  let imagesPushed = 0;
+  const imagesPending = async () => (await store.imagesToUpload()).length;
 
   if (!deps.isOnline()) {
-    return { phase: 'offline', pushed, pulled, pending: (await store.pending()).length, error: null, at };
+    return { phase: 'offline', pushed, pulled, pending: (await store.pending()).length, imagesPushed, imagesPending: await imagesPending(), error: null, at };
   }
 
   try {
@@ -59,6 +66,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       }
     }
 
+    imagesPushed = await pushImages(store, remote);
+
     const since = (await store.getMeta(LAST_PULL_KEY)) ?? null;
     let cursor = since;
     for (;;) {
@@ -77,12 +86,30 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       if (rows.length < PAGE) break;
     }
 
-    return { phase: 'idle', pushed, pulled, pending: (await store.pending()).length, error: null, at };
+    return { phase: 'idle', pushed, pulled, pending: (await store.pending()).length, imagesPushed, imagesPending: await imagesPending(), error: null, at };
   } catch (err) {
     const e = err instanceof RemoteError ? err : classifyRemoteError(err);
     const phase: SyncPhase = e.kind === 'network' ? 'offline' : e.kind === 'unauthorized' ? 'unauthorized' : 'error';
-    return { phase, pushed, pulled, pending: (await store.pending()).length, error: e.message, at };
+    return { phase, pushed, pulled, pending: (await store.pending()).length, imagesPushed, imagesPending: await imagesPending(), error: e.message, at };
   }
+}
+
+/** Sube las imágenes cuya visita ya está en el servidor. Solo un corte de red interrumpe la sincronización. */
+async function pushImages(store: VisitStore, remote: RemoteVisits): Promise<number> {
+  let pushed = 0;
+  for (const image of await store.imagesToUpload()) {
+    const visit = await store.get(image.id);
+    if (!visit?.image_path || visit.sync_state !== 'synced') continue;
+    try {
+      await remote.uploadImage(visit.id, visit.image_path, image.data, image.type);
+    } catch (err) {
+      if (isNetworkFailure(err) || (err instanceof RemoteError && err.kind === 'network')) throw classifyRemoteError(err);
+      continue; // p. ej. el bucket aún no existe: se reintenta más tarde
+    }
+    await store.putImage({ ...image, uploaded: true });
+    pushed++;
+  }
+  return pushed;
 }
 
 /** Marca como sincronizado solo si el registro no cambió mientras se enviaba. */

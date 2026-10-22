@@ -61,6 +61,12 @@ export function SettingsScreen() {
           Muestra dónde deben quedar el QR (naranja), el nombre (verde), la institución (naranja) y el cargo (azul), y espera a
           que la credencial esté alineada y quieta antes de leerla.
         </small>
+        <Toggle label="Guardar imagen de la credencial" checked={settings.saveBadgeImage} onChange={(v) => updateSettings({ saveBadgeImage: v })} />
+        <small className="muted">
+          Con cada escaneo se guarda la franja con nombre, institución y cargo (WebP o JPEG, ~15–40 KB) para revisar y corregir
+          errores de lectura desde el detalle de la visita. En modo sincronizado se sube a un almacenamiento privado de Supabase,
+          visible solo para operadores.
+        </small>
         <Toggle label="Registrar institución y cargo" checked={settings.captureAffiliation} onChange={(v) => updateSettings({ captureAffiliation: v })} />
         <Toggle label="Vibrar al leer (Android)" checked={settings.vibrate} onChange={(v) => updateSettings({ vibrate: v })} />
         <Toggle label="Sonido al leer" checked={settings.sound} onChange={(v) => updateSettings({ sound: v })} />

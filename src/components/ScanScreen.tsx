@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { beep, vibrate } from '../lib/feedback';
-import { ocrSupported, prewarmOcr, readBadge, type CapturedFrame } from '../lib/ocr';
+import { badgeZone, encodeBadgeImage, ocrSupported, prewarmOcr, readBadge, type CapturedFrame } from '../lib/ocr';
 import { parseQr } from '../lib/qr';
 import { ScanGate } from '../lib/scanGate';
 import { formatLocalTime, localDateKey } from '../lib/time';
@@ -27,6 +27,8 @@ export function ScanScreen() {
   visitsRef.current = visits;
   const frameRef = useRef<(() => CapturedFrame | null) | null>(null);
   const ocrRunRef = useRef(0);
+  /** Zona de la credencial de la lectura en curso (se guarda como imagen al registrar). */
+  const zoneRef = useRef<HTMLCanvasElement | null>(null);
   const [ocr, setOcr] = useState<OcrState>(OCR_IDLE);
   const ocrEnabled = settings.ocrEnabled && ocrSupported();
   const eventNameRef = useRef(settings.eventName);
@@ -40,9 +42,11 @@ export function ScanScreen() {
       return;
     }
     setOcr({ ...OCR_IDLE, status: 'running' });
+    zoneRef.current = badgeZone(frame);
     readBadge(frame, [eventNameRef.current])
       .then((reading) => {
         if (run !== ocrRunRef.current) return;
+        zoneRef.current = reading.zone;
         const names = reading.names.map((c) => c.name);
         setOcr({ status: names.length ? 'done' : 'empty', candidates: names, institution: reading.institution, role: reading.role, preview: reading.preview });
       })
@@ -73,6 +77,7 @@ export function ScanScreen() {
       const known = knownAffiliationFor(previous);
       setCandidate({ parsed, manualIdentifier: null, scannedAt, previous, knownName, knownInstitution: known.institution, knownRole: known.role, source });
       ocrRunRef.current++;
+      zoneRef.current = frame ? badgeZone(frame) : null;
       // Solo se lee la credencial si el QR no trae nombre ni hay uno confirmado antes para este código.
       if (ocrEnabled && frame && !parsed?.suggestedName && !knownName) runOcr(frame);
       else setOcr(OCR_IDLE);
@@ -84,13 +89,13 @@ export function ScanScreen() {
     (text: string) => {
       if (!gate.accept(text)) return;
       // Se copia el fotograma de inmediato: es el que muestra la credencial completa.
-      const frame = ocrEnabled ? (frameRef.current?.() ?? null) : null;
+      const frame = ocrEnabled || settings.saveBadgeImage ? (frameRef.current?.() ?? null) : null;
       if (settings.vibrate) vibrate(60);
       if (settings.sound) beep();
       setFlashKey((k) => k + 1);
       openCandidate(text, 'camera', frame);
     },
-    [gate, openCandidate, settings.vibrate, settings.sound, ocrEnabled],
+    [gate, openCandidate, settings.vibrate, settings.sound, settings.saveBadgeImage, ocrEnabled],
   );
 
   const isBlocked = useCallback((text: string) => gate.seen(text), [gate]);
@@ -115,7 +120,10 @@ export function ScanScreen() {
 
   async function confirm({ name, nameSource, institution, role, notes }: ConfirmData) {
     if (!candidate) return;
+    const zone = settings.saveBadgeImage ? zoneRef.current : null;
+    const image = zone ? await encodeBadgeImage(zone) : null;
     const visit = createVisit({
+      imageType: image?.type ?? null,
       parsed: candidate.parsed,
       manualIdentifier: candidate.manualIdentifier,
       attendeeName: name,
@@ -129,7 +137,8 @@ export function ScanScreen() {
       storePayload: settings.storePayload,
       syncMode: settings.mode === 'sync',
     });
-    await addVisit(visit);
+    await addVisit(visit, image);
+    zoneRef.current = null;
     setCandidate(null);
     ocrRunRef.current++;
     gate.release();
@@ -144,6 +153,7 @@ export function ScanScreen() {
   }
 
   function cancel() {
+    zoneRef.current = null;
     setCandidate(null);
     ocrRunRef.current++;
     gate.release();

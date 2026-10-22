@@ -55,6 +55,16 @@ export interface Visit {
   sync_state: SyncState;
   /** true si hay cambios locales (nombre/notas) aún no enviados al servidor. */
   dirty: boolean;
+  /**
+   * Imagen del texto de la credencial (ruta en Supabase Storage, p. ej. `<id>.webp`).
+   * Sirve para revisar y corregir lo que leyó el OCR. null o ausente: sin imagen.
+   */
+  image_path?: string | null;
+}
+
+/** Ruta de la imagen de una visita según su tipo MIME. */
+export function imagePathFor(id: string, type: string): string {
+  return `${id}.${type === 'image/webp' ? 'webp' : 'jpg'}`;
 }
 
 export function isIdentified(v: Pick<Visit, 'attendee_name'>): boolean {
@@ -94,6 +104,8 @@ export interface NewVisitInput {
   timeZone: string;
   storePayload: boolean;
   syncMode: boolean;
+  /** Tipo MIME de la imagen de la credencial que se guardará con la visita, si la hay. */
+  imageType?: string | null;
 }
 
 export function createVisit(input: NewVisitInput): Visit {
@@ -115,8 +127,9 @@ export function createVisit(input: NewVisitInput): Visit {
     identifier = id ? id.slice(0, MAX_IDENTIFIER_LENGTH) : null;
   }
   const name = cleanName(input.attendeeName);
+  const id = uuid();
   return {
-    id: uuid(),
+    id,
     attendee_name: name,
     name_source: name ? (input.nameSource ?? 'manual') : null,
     attendee_institution: cleanAffiliationField(input.institution),
@@ -133,6 +146,7 @@ export function createVisit(input: NewVisitInput): Visit {
     edits: [],
     sync_state: input.syncMode ? 'pending' : 'local',
     dirty: false,
+    image_path: input.imageType ? imagePathFor(id, input.imageType) : null,
   };
 }
 

@@ -21,6 +21,8 @@ export interface Settings {
   ocrEnabled: boolean;
   /** Guía de encuadre: esperar a que el QR coincida con el cuadro naranja antes de leer. */
   guideEnabled: boolean;
+  /** Guardar con cada visita la imagen del texto de la credencial, para revisar y corregir el OCR. */
+  saveBadgeImage: boolean;
   /** Registrar institución y cargo (2.ª y 3.ª línea de la credencial). */
   captureAffiliation: boolean;
   vibrate: boolean;
@@ -43,10 +45,11 @@ export const DEFAULT_SETTINGS: Settings = {
   storePayload: true,
   ocrEnabled: true,
   guideEnabled: true,
+  saveBadgeImage: true,
   captureAffiliation: true,
   vibrate: true,
   sound: false,
-  privacyNotice: 'Registramos tu nombre, institución, cargo y la hora de tu visita a nuestro stand para medir la afluencia. No compartimos estos datos con terceros.',
+  privacyNotice: 'Registramos tu nombre, institución, cargo, una imagen de esos datos en tu credencial y la hora de tu visita a nuestro stand para medir la afluencia. No compartimos estos datos con terceros.',
   csvSeparator: ';',
 };
 

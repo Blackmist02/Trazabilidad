@@ -103,6 +103,53 @@ alter table public.visits add constraint visits_affiliation_length_check
 revoke all on public.visits from anon;
 grant select, insert, update on public.visits to authenticated;
 
+-- ── Imagen de la credencial ────────────────────────────────────────────
+-- Franja con nombre, institución y cargo, para revisar y corregir la lectura OCR.
+-- Archivo <id de la visita>.webp (o .jpg) en el bucket privado badge-images.
+alter table public.visits add column if not exists image_path text;
+alter table public.visits drop constraint if exists visits_image_path_check;
+alter table public.visits add constraint visits_image_path_check
+  check (image_path is null or image_path in (id::text || '.webp', id::text || '.jpg'));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('badge-images', 'badge-images', false, 262144, array['image/webp', 'image/jpeg'])
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+-- ¿El usuario actual es operador del stand de la visita a la que pertenece la imagen?
+create or replace function public.can_access_badge_image(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.visits v
+    where p_name in (v.id::text || '.webp', v.id::text || '.jpg')
+      and public.is_operator(v.stand_id)
+  );
+$$;
+revoke all on function public.can_access_badge_image(text) from public, anon;
+grant execute on function public.can_access_badge_image(text) to authenticated;
+
+-- Leer, subir y reemplazar (la subida usa upsert: necesita select + insert + update). Sin política de borrado.
+drop policy if exists "badge_images_select" on storage.objects;
+create policy "badge_images_select" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'badge-images' and (select public.can_access_badge_image(name)));
+
+drop policy if exists "badge_images_insert" on storage.objects;
+create policy "badge_images_insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'badge-images' and (select public.can_access_badge_image(name)));
+
+drop policy if exists "badge_images_update" on storage.objects;
+create policy "badge_images_update" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'badge-images' and (select public.can_access_badge_image(name)))
+  with check (bucket_id = 'badge-images' and (select public.can_access_badge_image(name)));
+
 -- ── Auditoría de correcciones ──────────────────────────────────────────
 create table if not exists public.visit_audit (
   id         bigint generated always as identity primary key,
@@ -182,3 +229,5 @@ create trigger visits_before_update
 
 -- ── Retención: borrar los datos de un evento terminado ─────────────────
 --    delete from public.visits where event_date < current_date - interval '90 days';
+--    Las imágenes no se borran con la visita: elimínalas en Storage → badge-images
+--    (seleccionar los archivos → Delete). Sin la visita, ningún operador puede verlas.

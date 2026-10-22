@@ -17,7 +17,11 @@ export interface RemoteVisitRow {
   notes: string | null;
   created_at: string;
   updated_at?: string;
+  image_path?: string | null;
 }
+
+/** Bucket privado de Supabase Storage con las imágenes de las credenciales (ver supabase/schema.sql). */
+export const IMAGE_BUCKET = 'badge-images';
 
 export interface VisitChanges {
   attendee_name: string | null;
@@ -45,6 +49,8 @@ export interface RemoteVisits {
   update(id: string, changes: VisitChanges): Promise<void>;
   /** Filas del stand modificadas después de `since` (ISO) en orden ascendente. */
   fetchSince(standId: string, since: string | null, limit: number): Promise<RemoteVisitRow[]>;
+  /** Sube la imagen (reintentar no duplica: sobrescribe el mismo archivo) y la enlaza a la visita. */
+  uploadImage(visitId: string, path: string, data: ArrayBuffer, type: string): Promise<void>;
 }
 
 export function toRemoteRow(v: Visit): RemoteVisitRow {
@@ -84,6 +90,8 @@ export function fromRemoteRow(row: RemoteVisitRow, local?: Visit): Visit {
     edits: local?.edits ?? [],
     sync_state: 'synced',
     dirty: false,
+    // Una imagen local aún no subida conserva su ruta hasta que el servidor la tenga.
+    image_path: row.image_path ?? local?.image_path ?? null,
   };
 }
 
@@ -91,6 +99,13 @@ interface PostgrestLikeError {
   code?: string;
   message?: string;
   status?: number;
+}
+
+/** ¿Falló la conexión en sí (sin respuesta del servidor)? */
+export function isNetworkFailure(err: unknown): boolean {
+  const e = (err ?? {}) as { name?: string; message?: string; originalError?: unknown };
+  if (e.name === 'TypeError' || /fetch|network|Load failed/i.test(e.message ?? '')) return true;
+  return e.originalError != null && isNetworkFailure(e.originalError);
 }
 
 /** Clasifica errores de Supabase/PostgREST sin incluir datos personales en el mensaje. */
@@ -129,7 +144,7 @@ export function supabaseRemote(client: SupabaseClient): RemoteVisits {
     async fetchSince(standId, since, limit) {
       let q = client
         .from('visits')
-        .select('id,attendee_name,name_source,attendee_institution,attendee_role,qr_payload,qr_identifier,qr_kind,visited_at,event_date,stand_id,notes,created_at,updated_at')
+        .select('id,attendee_name,name_source,attendee_institution,attendee_role,qr_payload,qr_identifier,qr_kind,visited_at,event_date,stand_id,notes,created_at,updated_at,image_path')
         .eq('stand_id', standId)
         .order('updated_at', { ascending: true })
         .limit(limit);
@@ -138,7 +153,22 @@ export function supabaseRemote(client: SupabaseClient): RemoteVisits {
       if (error) throw classifyRemoteError(error, status);
       return (data ?? []) as RemoteVisitRow[];
     },
+    async uploadImage(visitId, path, data, type) {
+      const { error: upErr } = await client.storage
+        .from(IMAGE_BUCKET)
+        .upload(path, new Blob([data], { type }), { contentType: type, upsert: true });
+      if (upErr) throw classifyRemoteError(upErr, Number((upErr as { statusCode?: string }).statusCode) || undefined);
+      const { error, status } = await client.from('visits').update({ image_path: path }).eq('id', visitId);
+      if (error) throw classifyRemoteError(error, status);
+    },
   };
+}
+
+/** Descarga la imagen de una visita desde Supabase Storage. */
+export async function downloadImage(client: SupabaseClient, path: string): Promise<{ data: ArrayBuffer; type: string }> {
+  const { data, error } = await client.storage.from(IMAGE_BUCKET).download(path);
+  if (error || !data) throw classifyRemoteError(error);
+  return { data: await data.arrayBuffer(), type: data.type || (path.endsWith('.webp') ? 'image/webp' : 'image/jpeg') };
 }
 
 export interface AuditEntry {

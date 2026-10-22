@@ -81,7 +81,9 @@ Al detectar el QR, la app toma ese mismo fotograma de la cámara y lo lee con OC
 
 Con la foto de una credencial real de Edifica 2026 (tomada con la app en un iPhone) se obtienen los tres campos, también con la credencial girada ±12° o al revés; antes de este paso la app leía «Ela». En credenciales de prueba con el QR debajo, de distintos tamaños, tipografías e inclinaciones, también se obtienen los tres campos. Tarda ~0,2–0,5 s en un computador. En un teléfono tarda más, y con luz o enfoque deficientes la lectura puede fallar: el operador siempre puede corregir.
 
-Privacidad: la imagen no se guarda ni se envía a ningún servicio. Los archivos del OCR (~6 MB) se sirven desde la propia app (`public/ocr`, copiados en `npm run build`), se descargan al iniciar la cámara por primera vez y quedan en caché para funcionar sin conexión. Se puede desactivar en *Ajustes → Leer la credencial con la cámara*, y la institución y el cargo en *Ajustes → Registrar institución y cargo*.
+**Imagen de la credencial** (*Ajustes → Guardar imagen de la credencial*, activada): al registrar se guarda la zona leída (la franja con nombre, institución y cargo), en WebP o, en Safari de iOS que no genera WebP, en JPEG; máx. 900 px de ancho, ~15–40 KB. Queda en IndexedDB junto a la visita y se ve en el **detalle de la visita**, sobre los campos editables, para corregir faltas de ortografía o errores del OCR comparando con lo impreso. En modo sincronizado se sube al bucket privado `badge-images` de Supabase Storage (`<id>.webp`), visible solo para operadores del stand; si la subida falla, el registro se sincroniza igual y la imagen se reintenta. No se incluye en el CSV.
+
+Privacidad: aparte de esa franja recortada, el fotograma de la cámara no se guarda ni se envía a ningún servicio. Los archivos del OCR (~6 MB) se sirven desde la propia app (`public/ocr`, copiados en `npm run build`), se descargan al iniciar la cámara por primera vez y quedan en caché para funcionar sin conexión. Se puede desactivar en *Ajustes → Leer la credencial con la cámara*, y la institución y el cargo en *Ajustes → Registrar institución y cargo*.
 
 Prioridad del nombre: el QR (si lo trae explícito) va primero, luego una visita anterior confirmada del mismo código, luego el OCR y, por último, el nombre escrito a mano.
 
@@ -99,7 +101,7 @@ El ejemplo real `BDFFE48F81E448617430250Enp` es un **identificador opaco**. No h
 ```bash
 npm ci
 npm run dev        # http://localhost:5173/Trazabilidad/ (localhost permite la cámara)
-npm test           # 93 pruebas (Vitest + Testing Library + fake-indexeddb)
+npm test           # 98 pruebas (Vitest + Testing Library + fake-indexeddb)
 npm run build      # tsc + vite build → dist/
 ```
 

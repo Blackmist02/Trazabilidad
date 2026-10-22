@@ -11,6 +11,20 @@ interface TrazabilidadDB extends DBSchema {
     key: string;
     value: string;
   };
+  images: {
+    key: string;
+    value: StoredImage;
+  };
+}
+
+/** Imagen del texto de la credencial de una visita (se guarda como bytes: Safari falla con Blob en IndexedDB). */
+export interface StoredImage {
+  /** id de la visita */
+  id: string;
+  data: ArrayBuffer;
+  type: string;
+  /** true cuando ya está en Supabase Storage (o se descargó de allí). */
+  uploaded: boolean;
 }
 
 /** Almacén local de registros en IndexedDB. Persiste entre sesiones del navegador en este dispositivo. */
@@ -18,12 +32,15 @@ export class VisitStore {
   private dbPromise: Promise<IDBPDatabase<TrazabilidadDB>>;
 
   constructor(name = 'trazabilidad') {
-    this.dbPromise = openDB<TrazabilidadDB>(name, 1, {
-      upgrade(db) {
-        const visits = db.createObjectStore('visits', { keyPath: 'id' });
-        visits.createIndex('by_visited_at', 'visited_at');
-        visits.createIndex('by_sync_state', 'sync_state');
-        db.createObjectStore('meta');
+    this.dbPromise = openDB<TrazabilidadDB>(name, 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const visits = db.createObjectStore('visits', { keyPath: 'id' });
+          visits.createIndex('by_visited_at', 'visited_at');
+          visits.createIndex('by_sync_state', 'sync_state');
+          db.createObjectStore('meta');
+        }
+        if (oldVersion < 2) db.createObjectStore('images', { keyPath: 'id' });
       },
     });
   }
@@ -48,6 +65,30 @@ export class VisitStore {
     await Promise.all([...visits.map((v) => tx.store.put(v)), tx.done]);
   }
 
+  /** Guarda la visita y su imagen en una sola transacción. */
+  async putWithImage(visit: Visit, image: Omit<StoredImage, 'id' | 'uploaded'>): Promise<void> {
+    const db = await this.dbPromise;
+    const tx = db.transaction(['visits', 'images'], 'readwrite');
+    await Promise.all([
+      tx.objectStore('visits').put(visit),
+      tx.objectStore('images').put({ id: visit.id, data: image.data, type: image.type, uploaded: false }),
+      tx.done,
+    ]);
+  }
+
+  async getImage(id: string): Promise<StoredImage | undefined> {
+    return (await this.dbPromise).get('images', id);
+  }
+
+  async putImage(image: StoredImage): Promise<void> {
+    await (await this.dbPromise).put('images', image);
+  }
+
+  /** Imágenes aún no subidas a Supabase. */
+  async imagesToUpload(): Promise<StoredImage[]> {
+    return (await (await this.dbPromise).getAll('images')).filter((i) => !i.uploaded);
+  }
+
   async pending(): Promise<Visit[]> {
     return (await this.dbPromise).getAllFromIndex('visits', 'by_sync_state', 'pending');
   }
@@ -59,14 +100,17 @@ export class VisitStore {
   /** Elimina registros. Con `keepPending` conserva los que aún no se han enviado al servidor. */
   async clear(options: { keepPending?: boolean; onlyStates?: Visit['sync_state'][] } = {}): Promise<number> {
     const db = await this.dbPromise;
-    const tx = db.transaction('visits', 'readwrite');
+    const tx = db.transaction(['visits', 'images'], 'readwrite');
+    const images = tx.objectStore('images');
     let removed = 0;
-    let cursor = await tx.store.openCursor();
+    let cursor = await tx.objectStore('visits').openCursor();
     while (cursor) {
       const v = cursor.value;
       const keep = (options.keepPending && v.sync_state === 'pending') || (options.onlyStates && !options.onlyStates.includes(v.sync_state));
       if (!keep) {
         await cursor.delete();
+        // La imagen local se borra con su visita (una imagen aún no subida solo existe aquí).
+        await images.delete(v.id);
         removed++;
       }
       cursor = await cursor.continue();

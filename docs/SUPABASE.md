@@ -20,6 +20,7 @@ El modo sincronizado es opcional. Sin él, la app funciona en modo local (solo e
 | `visits` | Registros. RLS: solo operadores pueden `select`/`insert`/`update`; no hay `delete` desde el cliente. |
 | `visit_audit` | Historial de correcciones de nombre, institución, cargo y observaciones, escrito por trigger. Solo lectura para operadores. |
 | `visits_before_update` | Trigger que impide modificar hora, código o stand y audita cada corrección. |
+| Bucket `badge-images` | Storage privado con la imagen del texto de cada credencial (`<id>.webp`, máx. 256 KB, solo WebP/JPEG). Solo operadores del stand de esa visita pueden subirla o verla; nadie puede borrarla desde la app. |
 
 El rol `anon` (cualquiera que conozca la URL de la app) **no tiene acceso** a ninguna tabla.
 
