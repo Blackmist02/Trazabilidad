@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { ImageData64 } from '../lib/imageData';
 import type { Visit } from '../lib/visits';
 
 interface TrazabilidadDB extends DBSchema {
@@ -17,12 +18,13 @@ interface TrazabilidadDB extends DBSchema {
   };
 }
 
-/** Imagen del texto de la credencial de una visita (se guarda como bytes: Safari falla con Blob en IndexedDB). */
-export interface StoredImage {
+/**
+ * Imagen del texto de la credencial de una visita. Se guarda como data URL (texto):
+ * en Safari de iOS es más fiable que Blob o ArrayBuffer en IndexedDB.
+ */
+export interface StoredImage extends ImageData64 {
   /** id de la visita */
   id: string;
-  data: ArrayBuffer;
-  type: string;
   /** true cuando ya está en Supabase Storage (o se descargó de allí). */
   uploaded: boolean;
 }
@@ -66,12 +68,12 @@ export class VisitStore {
   }
 
   /** Guarda la visita y su imagen en una sola transacción. */
-  async putWithImage(visit: Visit, image: Omit<StoredImage, 'id' | 'uploaded'>): Promise<void> {
+  async putWithImage(visit: Visit, image: ImageData64): Promise<void> {
     const db = await this.dbPromise;
     const tx = db.transaction(['visits', 'images'], 'readwrite');
     await Promise.all([
       tx.objectStore('visits').put(visit),
-      tx.objectStore('images').put({ id: visit.id, data: image.data, type: image.type, uploaded: false }),
+      tx.objectStore('images').put({ id: visit.id, dataUrl: image.dataUrl, type: image.type, uploaded: false }),
       tx.done,
     ]);
   }

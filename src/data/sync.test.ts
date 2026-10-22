@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseQr } from '../lib/qr';
 import { applyEdit, createVisit, type Visit } from '../lib/visits';
+import { bytesToDataUrl, dataUrlToBytes, type ImageData64 } from '../lib/imageData';
 import { VisitStore } from './db';
 import { classifyRemoteError, RemoteError, type RemoteVisitRow, type RemoteVisits, type VisitChanges } from './remote';
 import { syncOnce } from './sync';
@@ -47,10 +48,11 @@ class FakeRemote implements RemoteVisits {
     if (row) this.rows.set(id, { ...row, ...changes, updated_at: this.stamp() });
     this.updates.push({ id, attendee_name: changes.attendee_name });
   }
-  async uploadImage(visitId: string, path: string, data: ArrayBuffer, type: string) {
+  async uploadImage(visitId: string, path: string, image: ImageData64) {
     if (this.failWith) throw this.failWith;
     if (this.imageFailWith) throw this.imageFailWith;
-    this.images.set(path, { path, bytes: data.byteLength, type });
+    const decoded = dataUrlToBytes(image.dataUrl)!;
+    this.images.set(path, { path, bytes: decoded.data.byteLength, type: decoded.type });
     const row = this.rows.get(visitId);
     if (row) this.rows.set(visitId, { ...row, image_path: path, updated_at: this.stamp() });
   }
@@ -171,14 +173,14 @@ describe('syncOnce', () => {
 });
 
 describe('imágenes de la credencial', () => {
-  const bytes = (n: number) => new Uint8Array(n).fill(7).buffer;
+  const img = (n: number, type = 'image/webp'): ImageData64 => ({ dataUrl: bytesToDataUrl(new Uint8Array(n).fill(7), type), type });
 
   it('guarda la imagen en el dispositivo y la sube tras enviar el registro', async () => {
     const store = newStore();
     const remote = new FakeRemote();
     const v = visit('AAA111', 'Ana', true, 'image/webp');
     expect(v.image_path).toBe(`${v.id}.webp`);
-    await store.putWithImage(v, { data: bytes(1200), type: 'image/webp' });
+    await store.putWithImage(v, img(1200));
     const r = await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
     expect(r).toMatchObject({ phase: 'idle', pushed: 1, imagesPushed: 1, imagesPending: 0 });
     expect(remote.images.get(`${v.id}.webp`)).toEqual({ path: `${v.id}.webp`, bytes: 1200, type: 'image/webp' });
@@ -192,7 +194,7 @@ describe('imágenes de la credencial', () => {
     const remote = new FakeRemote();
     remote.imageFailWith = { message: 'Bucket not found', statusCode: '404' };
     const v = visit('AAA111', 'Ana', true, 'image/jpeg');
-    await store.putWithImage(v, { data: bytes(10), type: 'image/jpeg' });
+    await store.putWithImage(v, img(10, 'image/jpeg'));
     const r = await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
     expect(r).toMatchObject({ phase: 'idle', pushed: 1, imagesPushed: 0, imagesPending: 1 });
     expect(remote.rows.get(v.id)?.image_path).toBeUndefined();
@@ -208,7 +210,7 @@ describe('imágenes de la credencial', () => {
     const store = newStore();
     const remote = new FakeRemote();
     const v = visit('AAA111', 'Ana', false, 'image/webp');
-    await store.putWithImage(v, { data: bytes(10), type: 'image/webp' });
+    await store.putWithImage(v, img(10));
     await syncOnce({ store, remote, standId: 'stand-1', isOnline: () => true });
     expect(remote.images.size).toBe(0);
   });
@@ -216,7 +218,7 @@ describe('imágenes de la credencial', () => {
   it('borrar la copia local elimina también las imágenes', async () => {
     const store = newStore();
     const v = visit('AAA111', 'Ana', false, 'image/webp');
-    await store.putWithImage(v, { data: bytes(10), type: 'image/webp' });
+    await store.putWithImage(v, img(10));
     expect(await store.clear()).toBe(1);
     expect(await store.getImage(v.id)).toBeUndefined();
   });

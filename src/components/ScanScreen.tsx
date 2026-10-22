@@ -121,7 +121,17 @@ export function ScanScreen() {
   async function confirm({ name, nameSource, institution, role, notes }: ConfirmData) {
     if (!candidate) return;
     const zone = settings.saveBadgeImage ? zoneRef.current : null;
-    const image = zone ? await encodeBadgeImage(zone) : null;
+    const encoded = zone ? encodeBadgeImage(zone) : null;
+    const image = encoded?.image ?? null;
+    // Motivo visible si se esperaba imagen y no la hay (para poder diagnosticarlo en el teléfono).
+    const imageNote =
+      !settings.saveBadgeImage || candidate.source !== 'camera'
+        ? ''
+        : !zone
+          ? ' · sin imagen (no se capturó la cámara)'
+          : encoded?.error
+            ? ` · sin imagen (${encoded.error})`
+            : '';
     const visit = createVisit({
       imageType: image?.type ?? null,
       parsed: candidate.parsed,
@@ -137,7 +147,13 @@ export function ScanScreen() {
       storePayload: settings.storePayload,
       syncMode: settings.mode === 'sync',
     });
-    await addVisit(visit, image);
+    try {
+      await addVisit(visit, image);
+    } catch {
+      // Si guardar la imagen falla, la visita se registra igual sin ella.
+      if (!image) throw new Error('No se pudo guardar la visita');
+      await addVisit({ ...visit, image_path: null });
+    }
     zoneRef.current = null;
     setCandidate(null);
     ocrRunRef.current++;
@@ -147,8 +163,8 @@ export function ScanScreen() {
       id: Date.now(),
       kind: visit.attendee_name ? 'success' : 'pending',
       text: visit.attendee_name
-        ? `Registrado: ${visit.attendee_name} · ${formatLocalTime(visit.visited_at, settings.timeZone)}`
-        : `Registrado sin nombre (pendiente) · ${formatLocalTime(visit.visited_at, settings.timeZone)}`,
+        ? `Registrado: ${visit.attendee_name} · ${formatLocalTime(visit.visited_at, settings.timeZone)}${imageNote}`
+        : `Registrado sin nombre (pendiente) · ${formatLocalTime(visit.visited_at, settings.timeZone)}${imageNote}`,
     });
   }
 

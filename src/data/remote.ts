@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { bytesToDataUrl, dataUrlToBytes, type ImageData64 } from '../lib/imageData';
 import type { Visit } from '../lib/visits';
 
 /** Fila de la tabla public.visits en Supabase (ver supabase/schema.sql). */
@@ -50,7 +51,7 @@ export interface RemoteVisits {
   /** Filas del stand modificadas después de `since` (ISO) en orden ascendente. */
   fetchSince(standId: string, since: string | null, limit: number): Promise<RemoteVisitRow[]>;
   /** Sube la imagen (reintentar no duplica: sobrescribe el mismo archivo) y la enlaza a la visita. */
-  uploadImage(visitId: string, path: string, data: ArrayBuffer, type: string): Promise<void>;
+  uploadImage(visitId: string, path: string, image: ImageData64): Promise<void>;
 }
 
 export function toRemoteRow(v: Visit): RemoteVisitRow {
@@ -153,10 +154,12 @@ export function supabaseRemote(client: SupabaseClient): RemoteVisits {
       if (error) throw classifyRemoteError(error, status);
       return (data ?? []) as RemoteVisitRow[];
     },
-    async uploadImage(visitId, path, data, type) {
+    async uploadImage(visitId, path, image) {
+      const bytes = dataUrlToBytes(image.dataUrl);
+      if (!bytes) throw new RemoteError('invalid', 'Imagen no válida.');
       const { error: upErr } = await client.storage
         .from(IMAGE_BUCKET)
-        .upload(path, new Blob([data], { type }), { contentType: type, upsert: true });
+        .upload(path, new Blob([bytes.data], { type: bytes.type }), { contentType: bytes.type, upsert: true });
       if (upErr) throw classifyRemoteError(upErr, Number((upErr as { statusCode?: string }).statusCode) || undefined);
       const { error, status } = await client.from('visits').update({ image_path: path }).eq('id', visitId);
       if (error) throw classifyRemoteError(error, status);
@@ -165,10 +168,11 @@ export function supabaseRemote(client: SupabaseClient): RemoteVisits {
 }
 
 /** Descarga la imagen de una visita desde Supabase Storage. */
-export async function downloadImage(client: SupabaseClient, path: string): Promise<{ data: ArrayBuffer; type: string }> {
+export async function downloadImage(client: SupabaseClient, path: string): Promise<ImageData64> {
   const { data, error } = await client.storage.from(IMAGE_BUCKET).download(path);
   if (error || !data) throw classifyRemoteError(error);
-  return { data: await data.arrayBuffer(), type: data.type || (path.endsWith('.webp') ? 'image/webp' : 'image/jpeg') };
+  const type = path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+  return { dataUrl: bytesToDataUrl(await data.arrayBuffer(), type), type };
 }
 
 export interface AuditEntry {

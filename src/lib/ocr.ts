@@ -1,4 +1,5 @@
 import type { Worker } from 'tesseract.js';
+import { dataUrlType, type ImageData64 } from './imageData';
 import { analyzeBadge, belowQrCrop, mergeBlockReading, QR_CROP_PIXELS, readBelowQr, type BadgeReading, type Box, type OcrLine, type QrLocation } from './ocrName';
 
 /** Fotograma copiado de la cámara y, si se conoce, la posición del QR en él. */
@@ -155,15 +156,14 @@ export function badgeZone({ canvas, qr }: CapturedFrame): HTMLCanvasElement {
 /** Ancho máximo de la imagen guardada: suficiente para leer el texto y ligera (~15–40 KB en WebP). */
 const IMAGE_MAX_WIDTH = 900;
 
-function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
-}
+/** Resultado de intentar codificar la imagen; `error` explica por qué no se pudo (sin datos personales). */
+export type EncodeResult = { image: ImageData64; error: null } | { image: null; error: string };
 
 /**
- * Codifica la zona en WebP. Safari en iOS no genera WebP desde un canvas (entrega PNG):
- * en ese caso se usa JPEG, que pesa algo más pero sigue siendo pequeño.
+ * Codifica la zona en WebP con `toDataURL` (lo mismo que la miniatura de la confirmación, que funciona
+ * en todos los navegadores). Safari en iOS no genera WebP (entrega PNG): entonces se usa JPEG.
  */
-export async function encodeBadgeImage(zone: HTMLCanvasElement): Promise<{ data: ArrayBuffer; type: string } | null> {
+export function encodeBadgeImage(zone: HTMLCanvasElement): EncodeResult {
   try {
     let canvas = zone;
     if (zone.width > IMAGE_MAX_WIDTH) {
@@ -171,16 +171,18 @@ export async function encodeBadgeImage(zone: HTMLCanvasElement): Promise<{ data:
       canvas.width = IMAGE_MAX_WIDTH;
       canvas.height = Math.round((zone.height * IMAGE_MAX_WIDTH) / zone.width);
       const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
+      if (!ctx) return { image: null, error: 'sin contexto de dibujo' };
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(zone, 0, 0, canvas.width, canvas.height);
     }
-    let blob = await toBlob(canvas, 'image/webp', 0.6);
-    if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg', 0.7);
-    if (!blob) return null;
-    return { data: await blob.arrayBuffer(), type: blob.type };
-  } catch {
-    return null;
+    for (const [format, quality] of [['image/webp', 0.6], ['image/jpeg', 0.7]] as const) {
+      const dataUrl = canvas.toDataURL(format, quality);
+      const type = dataUrlType(dataUrl);
+      if (type) return { image: { dataUrl, type }, error: null };
+    }
+    return { image: null, error: 'el navegador no generó la imagen' };
+  } catch (err) {
+    return { image: null, error: err instanceof Error ? err.name : 'error al codificar' };
   }
 }
 

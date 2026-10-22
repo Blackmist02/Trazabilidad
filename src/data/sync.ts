@@ -101,7 +101,7 @@ async function pushImages(store: VisitStore, remote: RemoteVisits): Promise<numb
     const visit = await store.get(image.id);
     if (!visit?.image_path || visit.sync_state !== 'synced') continue;
     try {
-      await remote.uploadImage(visit.id, visit.image_path, image.data, image.type);
+      await remote.uploadImage(visit.id, visit.image_path, image);
     } catch (err) {
       if (isNetworkFailure(err) || (err instanceof RemoteError && err.kind === 'network')) throw classifyRemoteError(err);
       continue; // p. ej. el bucket aún no existe: se reintenta más tarde

@@ -17,6 +17,7 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
   const { settings, editVisit, supabase, session, getVisitImage } = useApp();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageState, setImageState] = useState<'none' | 'loading' | 'ready' | 'unavailable'>(visit.image_path ? 'loading' : 'none');
+  const [imageError, setImageError] = useState<string | null>(null);
   const [name, setName] = useState(visit.attendee_name ?? '');
   const [notes, setNotes] = useState(visit.notes ?? '');
   const [institution, setInstitution] = useState(visit.attendee_institution ?? '');
@@ -40,19 +41,20 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
   useEffect(() => {
     if (!visit.image_path) return;
     let active = true;
-    let url: string | null = null;
     getVisitImage(visit)
-      .then((blob) => {
+      .then((dataUrl) => {
         if (!active) return;
-        if (!blob) return setImageState('unavailable');
-        url = URL.createObjectURL(blob);
-        setImageUrl(url);
+        if (!dataUrl) return setImageState('unavailable');
+        setImageUrl(dataUrl);
         setImageState('ready');
       })
-      .catch(() => active && setImageState('unavailable'));
+      .catch((err: unknown) => {
+        if (!active) return;
+        setImageError(err instanceof Error ? err.name : 'error');
+        setImageState('unavailable');
+      });
     return () => {
       active = false;
-      if (url) URL.revokeObjectURL(url);
     };
   }, [visit.id, visit.image_path, getVisitImage]);
 
@@ -85,12 +87,18 @@ export function VisitDetail({ visit, onClose }: { visit: Visit; onClose: () => v
         </div>
         {!visit.attendee_name && <div className="notice notice-warning">Pendiente de completar el nombre.</div>}
 
+        {imageState === 'none' && visit.qr_kind !== 'manual' && (
+          <p className="muted small">Este registro no tiene imagen de la credencial (se hizo sin cámara, con la opción desactivada o con una versión anterior).</p>
+        )}
         {imageState !== 'none' && (
           <figure className="badge-image">
             {imageState === 'ready' && imageUrl && <img src={imageUrl} alt="Texto de la credencial escaneada" />}
             {imageState === 'loading' && <span className="muted">Cargando imagen de la credencial…</span>}
             {imageState === 'unavailable' && (
-              <span className="muted">La imagen de la credencial no está en este dispositivo (inicia sesión con conexión para verla).</span>
+              <span className="muted">
+                La imagen de la credencial no está en este dispositivo
+                {imageError ? ` (${imageError})` : ''}. En modo sincronizado, inicia sesión con conexión para verla.
+              </span>
             )}
             <figcaption>Credencial escaneada: compárala con los datos y corrige si hace falta.</figcaption>
           </figure>
